@@ -1,5 +1,19 @@
 import sys, getopt
 
+### CLASS DEFINITIONS
+class IF():
+
+#class ISSUE():
+
+#class MEM():
+
+#class ALU():
+
+#class WB:
+
+#class REG():
+
+
 ifile = ''
 ofile = ''
 
