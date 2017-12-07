@@ -3,7 +3,39 @@ import getopt
 
 # CLASS DEFINITIONS
 
-# class IF():
+class CONTROL:
+    def __init__(self, output):
+        self.stalled = False
+        self.break_found = False
+        self.PC = 96
+        self.output = output
+
+
+class IF():
+    def __init__(self):
+        self.preIssue = [0, 0, 0, 0]
+
+    def sendNext(self):
+        temp = self.preIssue[0]
+        for x in range(0, 3):
+            self.preIssue[3-x] = self.preIssue[2-x]
+        return temp
+
+    def findNextEmptyEntry(self):
+        for x in range(0, 3):
+            if self.preIssue[x] == 0:
+                return x
+        return 4
+
+    def fetch(self, cache, pc):
+        self.preIssue[self.findNextEmptyEntry] = cache.ping(pc)
+        if self.findNextEmptyEntry < 3:
+            self.preIssue[self.findNextEmptyEntry] = cache.ping(pc)
+        # Should we be checking here for J or BLTZ instructions?
+        # also,
+
+
+
 
 # class ISSUE():
 
@@ -13,7 +45,10 @@ import getopt
 
 # class WB:
 
-# class REG():
+
+class Reg():
+    def __init__(self):
+        self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 
 ifile = ''
@@ -43,7 +78,15 @@ def to_int_2c(bin):
         conversion -= 2 ** len(bin)
     return conversion
 
+
 output_file = open(ofile + "_dis.txt", "w")
+
+
+# read each line of file and put in list
+with open(ifile, 'r') as infile:
+    data = infile.read()
+my_list = data.splitlines()
+
 
 mem_address = 96
 is_not_break = True
