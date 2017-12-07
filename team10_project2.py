@@ -29,13 +29,19 @@ for o, a in myopts:
                 ofile = a
 
 
-outfile = open(ofile + "_sim.txt", 'w')
+# outfile = open(ofile + "_sim.txt", 'w')
 
 
 # read each line of file and put in list
 # with open(ifile, 'r') as infile:
 #    data = infile.read()
 # my_list = data.splitlines()
+
+def to_int_2c(bin):
+    conversion = int(bin, 2)
+    if bin[0] == '1':
+        conversion -= 2 ** len(bin)
+    return conversion
 
 output_file = open(ofile + "_dis.txt", "w")
 
