@@ -1,0 +1,101 @@
+IF:
+	takes 2 instructions
+	FETCH:
+		check:
+			if stalled, no fetch
+			if no room in pre-issue buffer, no fetch
+			if 1 spot open, only fetch 1
+			if instruction not in cache, cache unit will fetch from memory and it will be in cache for next CC
+				next instruction must wait and can't be fetched even if its in cache
+			if instruction in cache, fetch/decode takes 1 CC
+			if branch instruction (J, JR, BEQ, BLTZ) with next instruction is fetched, discard next instruction
+				fetch unit try to read all argument registers
+					if registers are ready or if target is immediate, PC will update at end of CC
+					if registers not ready, stall IF until available
+			if BREAK is fetched, no more instructions will be fetched
+			Branch, BREAK, NOP and invalid instructions will be fetched but will not go to pre-issue buffer
+			
+PRE-ISSUE BUFFER:
+	holds 4 entries, each can store a single instruction
+	instructions stored in program order
+		entry 0 holds oldest instruction, 3 holds newest
+ISSUE UNIT:
+	can do 2 instructions (out of order) each CC
+	instruction issue:
+		instruction move out of pre-issue buffer to either pre-mem buffer or pre-ALU buffer
+		issue unit searches entry 0 -> 3 in order and issues instructions if...
+			no structural hazards (room in pre-mem/pre-alu)
+			no WAW hazards exist for active instructions (issued but not finished, or earlier no-issued instructions)
+			no WAR hazards exist with earlier not-issued instructions
+			no RAW hazards exist with active instructions (all operands ready)
+			load instruction must wait for all previous stores to be issued
+			store instructions must be issued in order
+	PRE-ALU buffer:
+		holds 2 entries
+		each entry stores an instruction with opoerands
+		buffer is managed as a FIFO queue
+	ALU:
+		handles all non-memory instructions (everything except LW and SW and branch instructions(handled in IF))
+		all ALU operations take 1 CC
+		when finished, instruction moves from pre-ALU -> post-ALU
+		ALU can only fetch one instruction from the pre-ALU
+	Post-ALU buffer:
+		holds 1 entry
+		stores instruction with destination register ID and result of the ALU operation
+	PRE-MEM Buffer:
+		holds 2 entries
+		each can store an instruction with address and data (for SW) managed as FIFO
+	MEM Unit:
+		handles LW, SW
+		LW:
+			if in cache, takes 1 CC
+			if not in cache, can't do in CC, retry in next cycle. instruction stays in pre-mem buffer
+			after cache hit, operation finishes
+				instruction, destination register, data written to post-MEM buffer
+		SW:
+			if in cache, takes 1 CC
+			if not in cache, retry in next cycle, instruction statys in pre-mem buffer
+			after cache hit, instruction finishes
+				doesn't go to post-mem buffer
+	WRITE BACK UNIT:
+		can execute 2 write-backs in 1 CC
+		fetches contents from post-ALU and post-MEM buffers and updates register files
+	PC:
+		holds address of next instruction
+		initialize to 96
+	REGISTER FILE:
+		32 registers
+
+notes:
+	finish when BREAK instruction is fetched and pipeline is empty (finish other instructions)
+	no data forwarding
+	no delay slot will be used for branching
+DIFFERENT INSTRUCTION FINISHES
+	NOP, Branch, BREAK only use IF
+	SW only uses IF, issue, MEM
+	LW uses IF, issue, MEM, and WB
+	ALU ops use IF, issue, ALU, WB
+
+CACHE:
+	2-way associative cache with 4 sets
+	each cache block holds 2 data words (64 bits)
+	all memory fetch operations return two words (64 bits)
+	
+	LRU bit | set 0 line 0 | set 0 line 1
+
+	each word: valid bit | dirty bit | tag | data
+	
+	lower 2 bits discarded when calculating which set data will be written to cache
+	lower 3 bits of memory address discarded when calculating which cache set data should be written to
+	IF and MEM can access cache at same cycle
+		if both do, assume MEM accesses first then IF
+	LRU initialized at 0
+	all bits initialized 0
+	when valid line exists, valid bit will be turned on (set -> 1)
+	dirty bit turned on when pipeline writes to any part of the line
+	
+	takes 1 CC to get data from memory to cache
+	both cache and request unit (IF or MEM) can get data at the same cycle
+		(IF requests data in cycle 5 but not in cache, IF and cache will get the data in cycle 6)
+	write-back from cache to main memory takes no time
+	all dirty blocks written back at the cycle the simulation is finished
