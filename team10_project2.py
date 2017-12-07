@@ -1,43 +1,97 @@
 import sys
 import getopt
 
+
 # CLASS DEFINITIONS
+class CACHE(input):
+    def __init__(self, input):
+        """EXTREMELY NOT SURE HOW TO HANDLE THE CACHE'S SETS"""
+        self.sets = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.tags = [0, 0, 0, 0, 0, 0, 0, 0]
+        self.instructions = input.splitlines()
+
+    def ping(self, pc):
+        print() # dummy instruction because pycharm was bitching about indentation
+        # algorithm for hit or miss
+        # if hit return set
+        # if miss, read self.instructions at (pc-96)/4 and pull next two instr, put them somewhere
+
+    def lw(self, address):
+        print()
+        # algorithm for hit or miss
+        # if hit return data
+        # if miss, read self.instructions at (pc-96)/4 and pull that data, put it somewhere
+
+    def sw(self, address):
+        print()
+        # algorithm for hit or miss
+        # if hit, do something?
+        # if miss, do something else?
 
 class CONTROL:
-    def __init__(self, output):
+    def __init__(self, output, input):
         self.stalled = False
         self.break_found = False
-        self.PC = 96
+        self.pc = 96
+        self.cycle = 1
         self.output = output
 
+        """MACHINE COMPONENTS"""
+        self.cache = CACHE(input.read())
+        self.ifetch = IF()
+        self.issue = ISSUE()
+        self.reg = REG()
 
-class IF():
+    def print_state(self):
+        self.output.write('--------------------\n')
+        self.output.write('Cycle: ' + self.cycle + '\n\n')
+        self.ifetch.print_prebuffer(self.output)
+        # stuff printed after fetch goes here
+        self.reg.print_regs(self.output)
+        # stuff printed after registers goes here
+
+    def next_cycle(self):
+        # stuff that happens before instr fetch goes here
+        self.ifetch.fetch(self.cache, self.pc)
+        # stuff that happens after instr fetch goes here
+        self.pc += 4
+        self.print_state()
+
+
+class IF:
     def __init__(self):
-        self.preIssue = [0, 0, 0, 0]
+        self.pre_issue = [0, 0, 0, 0]
 
-    def sendNext(self):
-        temp = self.preIssue[0]
-        for x in range(0, 3):
-            self.preIssue[3-x] = self.preIssue[2-x]
-        return temp
-
-    def findNextEmptyEntry(self):
-        for x in range(0, 3):
-            if self.preIssue[x] == 0:
+    def find_next_empty_entry(self):
+        for x in range(0, 4):
+            if self.pre_issue[x] == 0:
                 return x
         return 4
 
     def fetch(self, cache, pc):
-        self.preIssue[self.findNextEmptyEntry] = cache.ping(pc)
-        if self.findNextEmptyEntry < 3:
-            self.preIssue[self.findNextEmptyEntry] = cache.ping(pc)
-        # Should we be checking here for J or BLTZ instructions?
-        # also,
+        self.pre_issue[self.find_next_empty_entry] = cache.ping(pc)
+        if self.find_next_empty_entry < 3:
+            self.pre_issue[self.find_next_empty_entry] = cache.ping(pc)
+        """Should we be checking here for J or BLTZ instructions?
+            also, does cache identify the break?"""
+
+    def print_prebuffer(self, outfile):
+        outfile.write('Pre-Issue Buffer:\n')
+        for x in range(0, 4):
+            outfile.write('Entry ' + x + ':')
+            if self.pre_issue[x] != 0:
+                outfile.write(':\t[' + inst_to_str(self.pre_issue[x]) + ']\n')
 
 
+class ISSUE():
 
+    def send_next(self, pre_issue, alu, mem):
+        temp = pre_issue[0]
+        for x in range(0, 3):
+            pre_issue[3-x] = pre_issue[2-x]
+        return temp
+    """I'm fairly certain I've confused the functions of the IF and ISSUE components so imma leave this be for now"""
 
-# class ISSUE():
 
 # class MEM():
 
@@ -46,31 +100,25 @@ class IF():
 # class WB:
 
 
-class Reg():
+class REG:
     def __init__(self):
         self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
+    def print_regs(self, output):
+        output.write('Registers\nR00:')
+        for x in range(0, 8):
+            output.write('\t' + self.r[x])
+        output.write('R08:')
+        for x in range(8, 16):
+            output.write('\t' + self.r[x])
+        output.write('R16:')
+        for x in range(16, 24):
+            output.write('\t' + self.r[x])
+        output.write('R24:')
+        for x in range(24, 32):
+            output.write('\t' + self.r[x])
+        output.write('\n')
 
-ifile = ''
-ofile = ''
-
-
-myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
-
-for o, a in myopts:
-        if o == '-i':
-                ifile = a
-        elif o == '-o':
-                ofile = a
-
-
-# outfile = open(ofile + "_sim.txt", 'w')
-
-
-# read each line of file and put in list
-# with open(ifile, 'r') as infile:
-#    data = infile.read()
-# my_list = data.splitlines()
 
 def to_int_2c(bin):
     conversion = int(bin, 2)
@@ -79,16 +127,7 @@ def to_int_2c(bin):
     return conversion
 
 
-out_file = open(ofile + "_dis.txt", "w")
-
-
-# read each line of file and put in list
-with open(ifile, 'r') as infile:
-    data = infile.read()
-my_list = data.splitlines()
-
-
-def inst_to_string(x):
+def inst_to_str(x):
     def R():
         instruction = x[26:]
         instruction_hex = int(instruction, 2)
@@ -196,6 +235,7 @@ def inst_to_string(x):
         J()
     else:
         I()
+
 
 def dis(output_file, my_list):
     mem_address = 96
@@ -338,3 +378,22 @@ def dis(output_file, my_list):
             mem_address += 4
             converted_binary = str(to_int_2c(x[1:]))
             output_file.write(x + '\t' + mem_address_str + '\t' + converted_binary + '\n')
+
+
+ifile = ''
+ofile = ''
+
+out_file = open(ofile + "_dis.txt", "w")
+
+# read each line of file and put in list
+with open(ifile, 'r') as infile:
+    data = infile.read()
+my_list = data.splitlines()
+
+myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
+
+for o, a in myopts:
+        if o == '-i':
+                ifile = a
+        elif o == '-o':
+                ofile = a
