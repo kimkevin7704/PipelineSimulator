@@ -8,7 +8,10 @@ def to_int_2c(bin):
         conversion -= 2 ** len(bin)
     return conversion
 
+
+
 def inst_to_str(x):
+
     def R():
         instruction = x[26:]
         instruction_hex = int(instruction, 2)
@@ -273,6 +276,7 @@ class CONTROL:
         #things we need: pre-issue buffer
         self.cache = CACHE(iput)
         self.ifetch = IF()
+        self.pib = PREISSUEBUFFER()
         self.issue = ISSUE()
         self.reg = REG()
 
@@ -384,33 +388,36 @@ class CACHE:
 class IF:
     def __init__(self):
         self.pre_issue = [0, 0, 0, 0]
-        self.prebuff_buffer = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
+        self.hitCheck = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
         self.isStall = False            # if fetch unit is stalled, no instruction fetch
 
+    # returns number of instructions IF can fetch
+    def canFetch(self, controller):
+        # if stalled, return 0
+        if self.isStall == True:
+            return 0
+        availableSlots = controller.pib.isFull()
+        # return number of slots available in PIB
+        if availableSlots == 0:
+            return 0
+        if availableSlots == 1:
+            return 1
+        else:
+            return 2
 
-    def find_next_empty_entry(self):
-        for x in range(0, 4):
-            if self.pre_issue[x] == 0:
-                return x
-        return 4
-
-    def fetch(self, cache, pc):         # requests information at address: pc from cache
-        self.prebuff_buffer = cache.ping(pc)
-        if self.prebuff_buffer < 0:     # make sure we hit
+    def fetch(self, cache, pc, controller):         # requests information at address: pc from cache
+        self.hitCheck = cache.ping(pc)
+        if self.hitCheck < 0:     # make sure we hit
             return -1
-        self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
-        if self.find_next_empty_entry() < 3 and self.prebuff_buffer > 0: # if hit and we have space, get next word also
-            self.prebuff_buffer = cache.ping(pc + 4)
-            self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
+        # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
+        controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
+        if controller.pib.isFull() > 0 and cache.ping(pc + 4) > 0: # if hit and we have space, get next word also
+            self.hitCheck = cache.ping(pc + 4)
+            controller.pib.addToBuffer(self.hitCheck)
         """Should we be checking here for J or BLTZ instructions?
             also, does cache identify the break?"""
-
-    def print_prebuffer(self, outfile):
-        outfile.write('Pre-Issue Buffer:\n')
-        for x in range(0, 4):
-            outfile.write('Entry ' + x + ':')
-            if self.pre_issue[x] != 0:
-                outfile.write(':\t[' + inst_to_str(self.pre_issue[x]) + ']\n')
+        
+        # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
 
 class PREISSUEBUFFER:
     def __init__(self):
@@ -418,9 +425,17 @@ class PREISSUEBUFFER:
         self.isFilled = False       #if filled no instruction fetch
         self.oneLeft = False        #if one empty slot, only one instruction fetched
 
+    # add instruction to PIB [0,0,0,0] --> [0,0,0,I1]
     def addToBuffer(self, instruction):
         self.buffer.pop(0)
         self.buffer.append(instruction)
+
+    # remove instruction from PIB [0,0,I2,I1] --> [0,0,0,I2]
+    def removeFromBuffer(self):
+        # if first in line of PIB is occupied, POP and add 0 at end of line
+        if self.buffer[3] != 0:
+            self.buffer.pop(3)
+            self.buffer.insert(0,"0")
 
     # check if preissue buffer is full, has 1 slot, or more than 1 available
     # RETURNS NUMBER OF SLOTS TO FILL FOR IF
@@ -436,6 +451,21 @@ class PREISSUEBUFFER:
         else:
             return 2
 
+    def printPrebuffer(self, outfile):
+        outfile.write('Pre-Issue Buffer:\n')
+        for x in range(0, 4):
+            outfile.write('Entry ' + x + ':')
+            if self.buffer[x] != 0:
+                outfile.write(':\t[' + inst_to_str(self.buffer[x]) + ']\n')
+
+class ISSUE():
+
+    def send_next(self, pre_issue, alu, mem): # no idea what I was going for here
+        temp = pre_issue[0]
+        for x in range(0, 3):
+            pre_issue[3-x] = pre_issue[2-x]
+        return temp
+    """I'm fairly certain I've confused the functions of the IF and ISSUE components so imma leave this be for now"""
 
 
 # DRIVER
@@ -465,7 +495,15 @@ dis(out_file_dis, my_list)
 #initialize pipeline
 controller = CONTROL(my_list, out_file_pipeline)
 
-controller.ifetch.fetch(controller.cache, controller.pc)
+#start Clock Cycle
+
+#WHILE INSTRUCTION IS NOT BREAK...
+
+#try to fetch instructions
+#check: 1. stall 2. PIB room 3. instruction type
+if controller.ifetch.isStall == False:
+    if controller.pib.isFull() > 0:
+        # if
 
 
 
@@ -475,14 +513,6 @@ controller.ifetch.fetch(controller.cache, controller.pc)
 
 
 
-class ISSUE():
-
-    def send_next(self, pre_issue, alu, mem): # no idea what I was going for here
-        temp = pre_issue[0]
-        for x in range(0, 3):
-            pre_issue[3-x] = pre_issue[2-x]
-        return temp
-    """I'm fairly certain I've confused the functions of the IF and ISSUE components so imma leave this be for now"""
 
 
 # class MEM():
