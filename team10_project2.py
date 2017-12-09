@@ -4,8 +4,55 @@ import getopt
 """
     KEVIN'S UPDATE NOTES
     
-    I don't understand the caching shit at all... didn't mess with it
-    LW and SW instructions can be defined with the rest of the instructions. (we have the code already)
+    I don't understand tags, lru shit at all... not sure how to grab instructions other than the straight binary string from the input file
+    If you know how to pull the instruction, registers/address, tag, set and all that info from the binary instruction in memory, we need that to go forward
+    
+    LW and SW instructions can be defined with the rest of the instructions. (we have the code already but I don't know how to apply it when
+    we fetch instructions from cache/memory)
+    
+    CODE FOR INSTRUCTIONS (mem-address will be based on pc? Regis will be from the REG class):
+    def JUMP(jAddress):
+        global mem_address
+        mem_address = int(jAddress) - 4
+
+    def JR(rs):
+            global mem_address
+            mem_address = R[int(rs)] - 4
+    
+    def BEQ(rs, rt, label):
+            if Regis[int(rs)] == Regis[int(rt)]:
+                    global mem_address
+                    mem_address = mem_address + int(label)
+    def BLTZ(rs, label):
+            if int(Regis[int(rs)]) < 0:
+                    global mem_address
+                    mem_address = mem_address + int(label)
+    
+    def ADD(rd, rs, rt):
+            Regis[int(rd)] = Regis[int(rs)] + Regis[int(rt)]
+    def ADDI(rt, rs, imm):
+            Regis[int(rt)] = Regis[int(rs)] + int(imm)
+    def SUB(rd, rs, rt):
+            Regis[int(rd)] = Regis[int(rs)] - Regis[int(rt)]
+    def SW(rs, rt, bOffset):
+            pMem[int(((int(bOffset) + int(Regis[int(rs)])) - 172)/4)] = int(Regis[int(rt)])
+    def LW(rs, rt, bOffset):
+            Regis[int(rt)] = pMem[int(((int(bOffset) + int(Regis[int(rs)])) - 172)/4)]
+    def SLL(rd, rs, shamt):
+            Regis[int(rd)] = int(str(Regis[int(rs)]), 10) << int(shamt)
+    def SRL(rd, rs, shamt):
+            Regis[int(rd)] = int(str(Regis[int(rs)]), 10) << int(shamt)      
+    def MUL(rd, rs, rt):
+            Regis[int(rd)] = Regis[int(rs)] * Regis[int(rt)]
+    def AND(rd, rs, rt):
+            Regis[int(rd)] = Regis[int(rs)] & Regis[int(rt)]
+    def OR(rd, rs, rt):
+            Regis[int(rd)] = Regis[int(rs)] | Regis[int(rt)]
+    def MOVZ(rd, rs, rt):
+            if Regis[int(rt)] == int(0):
+                    Regis[int(rd)] = Regis[int(rs)]
+    def NOP():
+    
     
     THINGS ADDED:
         1. disassembler driver added (writes .txt disassembler output on run)
@@ -16,12 +63,11 @@ import getopt
         5. Started a driver for our pipeline output. Need to update as we go along
     
     THINGS WE NEED:
-        1. fetching shit from cache (when to pull into cache from memory etc)
+        1. fetching shit from cache
         2. way to define instructions from raw instruction and pass info to methods (need IF to differentiate instruction types)
     
     If instruction fetching from cache/memory works, I'll probably be able to code the rest of the pipeline ez.
     hard to write stuff for alu, mem, wb since we need to know the instruction type, registers, etc.
-    
 """
 # DISASSEMBLER METHODS
 def to_int_2c(bin):
@@ -393,19 +439,6 @@ class CACHE:
 
     def grab_mem(self, pc): # pull the requested address from instructions or memory based on break_line value
         print()
-
-    def lw(self, address):
-        print()
-        # algorithm for hit or miss
-        # if hit return data
-        # if miss, read self.instructions at (pc-96)/4 and pull that data, put it somewhere
-
-    def sw(self, address):
-        print()
-        # algorithm for hit or miss
-        # if hit, do something?
-        # if miss, do something else?
-        # BASED ON TALKING TO EMI, ALL THESE FUNCTIONS MIGHT BE SUPERFLUOUS
 
 class IF:
     def __init__(self):
