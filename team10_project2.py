@@ -1,202 +1,13 @@
 import sys
 import getopt
 
-
-# CLASS DEFINITIONS
-class CACHE(object):
-    def __init__(self, iput):
-        """Sets is a 3D array -
-            1st D is sets 0 - 3
-            2nd D is which entry (2 total) in the set
-            3rd D is the actual info in this format: [valid bit, dirty bit, tag, word1, word2]
-
-            when looking for shit in the cache, the IF will request information at whatever location the pc is at in the
-            form of: 110000 (for 96)
-
-            The cache interprets the requested address by breaking it down into parts. The lowest 2 bits are not needed
-            at all, since we are incrementing in terms of 4 (so they will always be 0) and the next lowest bit isn't
-            needed either since we are double-word aligned for each entry. The next lowest 2 bits we use to determine
-            which of the 4 sets we are putting to or getting from, and whatever top bits are left
-            are our tag (should be 2 but that only gives us addressing to 127... so might be more ). The tag is used to
-            verify that the item in cache is, in fact, the thing we are looking for, so whenever we put shit to cache we
-            have to set the tag, and whenever we check cache for shit we have to compare the tag bits in our request to
-            the tag bits in that set in our cache.
-
-            LRU (not implemented yet) is set to 0 or 1 to notate which entry was NOT used last. So if we store shit in
-            Entry 0, then our LRU will be 1, so the next time we have to write over something we write in Entry 1"""
-
-        self.sets = [[[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]]
-        self.lru = [0, 0, 0, 0]
-        self.instructions = []  # list containing all instruction items
-        self.memory = []        # list containing all data memory items
-        self.mem = iput
-        self.request_tag = 0    # tag to compare when checking for cache hit
-        self.hit = False
-        self.mem_to_grab = -1   # memory slot/s to be pulled on cache miss
-        self.assocblock = 0     # 0 or 1, location of the block within a set when cache hit is detected
-        self.request_set = 0    # set to check for a cache hit
-        self.tag_mask = 0b1100
-        self.break_line = 96
-        self.split_mem(self.mem)  # split input into instruction and (data) memory lists
-
-    def ping(self, pc):
-        self.request_set = pc >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
-        self.request_tag = pc & self.tag_mask
-        self.request_tag = self.request_tag >> 3
-        if self.sets[self.request_set][0][2] == self.request_tag:       # check first block in matching set for hit
-            self.assocblock = 0
-            self.hit = True
-        elif self.sets[self.request_set][1][2] == self.request_tag:     # check second block
-            self.assocblock = 1
-            self.hit = True
-        if self.hit:
-            if pc % 8 == 0:
-                return self.sets[self.request_set][0]       # if address is %8 then we want the first word in block
-            else:
-                return self.sets[self.request_set][1]       # else we want second word in block
-        else:
-            self.hit = False
-            self.mem_to_grab = pc  # cache miss, update this var and it will be pulled at the very end of the cycle
-            return -1
-
-    def split_mem(self, mem): # populates our lists at initialization
-        is_not_break = True
-        for line in mem:
-            if is_not_break:
-                x = line
-                self.instructions.append(x[0:32])
-                if x == '10000000000000000000000000001101':
-                    is_not_break = False
-                else:
-                    self.break_line += 4  # finds the mem location for BREAK so we can determine which list to pull from
-            else:
-                x = line
-                self.memory.append(x[0:32])
-
-    def grab_mem(self, pc): # pull the requested address from instructions or memory based on break_line value
-        print()
-
-    def lw(self, address):
-        print()
-        # algorithm for hit or miss
-        # if hit return data
-        # if miss, read self.instructions at (pc-96)/4 and pull that data, put it somewhere
-
-    def sw(self, address):
-        print()
-        # algorithm for hit or miss
-        # if hit, do something?
-        # if miss, do something else?
-        # BASED ON TALKING TO EMI, ALL THESE FUNCTIONS MIGHT BE SUPERFLUOUS
-
-class CONTROL(object):
-    def __init__(self, iput, oput):
-        self.stalled = False
-        self.break_found = False
-        self.pc = 96
-        self.cycle = 1
-        self.output = oput
-        self.miss = False
-
-        """MACHINE COMPONENTS"""
-        self.cache = CACHE(iput)
-        self.ifetch = IF()
-        self.issue = ISSUE()
-        self.reg = REG()
-
-    def print_state(self):  # function to output all states of current cycle
-        self.output.write('--------------------\n')
-        self.output.write('Cycle: ' + self.cycle + '\n\n')
-        self.ifetch.print_prebuffer(self.oput)
-        # stuff printed after fetch goes here
-        self.reg.print_regs(self.output)
-        # stuff printed after registers goes here
-
-    def next_cycle(self):
-        # stuff that happens before instr fetch goes here
-        self.ifetch.fetch(self.cache, self.pc)
-        # stuff that happens after instr fetch goes here
-        self.print_state()
-        if self.miss:
-            self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
-            self.miss = False
-        else:
-            self.pc += 4                    # if no cache miss, increment PC
-
-
-class IF:
-    def __init__(self):
-        self.pre_issue = [0, 0, 0, 0]
-        self.prebuff_buffer = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
-
-    def find_next_empty_entry(self):
-        for x in range(0, 4):
-            if self.pre_issue[x] == 0:
-                return x
-        return 4
-
-    def fetch(self, cache, pc):         # requests information at address: pc from cache
-        self.prebuff_buffer = cache.ping(pc)
-        if self.prebuff_buffer < 0:     # make sure we hit
-            return -1
-        self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
-        if self.find_next_empty_entry() < 3 and self.prebuff_buffer > 0: # if hit and we have space, get next word also
-            self.prebuff_buffer = cache.ping(pc + 4)
-            self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
-        """Should we be checking here for J or BLTZ instructions?
-            also, does cache identify the break?"""
-
-    def print_prebuffer(self, outfile):
-        outfile.write('Pre-Issue Buffer:\n')
-        for x in range(0, 4):
-            outfile.write('Entry ' + x + ':')
-            if self.pre_issue[x] != 0:
-                outfile.write(':\t[' + inst_to_str(self.pre_issue[x]) + ']\n')
-
-
-class ISSUE():
-
-    def send_next(self, pre_issue, alu, mem): # no idea what I was going for here
-        temp = pre_issue[0]
-        for x in range(0, 3):
-            pre_issue[3-x] = pre_issue[2-x]
-        return temp
-    """I'm fairly certain I've confused the functions of the IF and ISSUE components so imma leave this be for now"""
-
-
-# class MEM():
-
-# class ALU():
-
-# class WB:
-
-
-class REG:
-    def __init__(self):
-        self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-
-    def print_regs(self, output):
-        output.write('Registers\nR00:')
-        for x in range(0, 8):
-            output.write('\t' + self.r[x])
-        output.write('R08:')
-        for x in range(8, 16):
-            output.write('\t' + self.r[x])
-        output.write('R16:')
-        for x in range(16, 24):
-            output.write('\t' + self.r[x])
-        output.write('R24:')
-        for x in range(24, 32):
-            output.write('\t' + self.r[x])
-        output.write('\n')
-
+# DISASSEMBLER METHODS
 
 def to_int_2c(bin):
     conversion = int(bin, 2)
     if bin[0] == '1':
         conversion -= 2 ** len(bin)
     return conversion
-
 
 def inst_to_str(x):
     def R():
@@ -451,9 +262,74 @@ def dis(output_file, my_list):
             output_file.write(x + '\t' + mem_address_str + '\t' + converted_binary + '\n')
 
 
+# CLASS DEFINITIONS FOR PIPELINE
+class CONTROL:
+    def __init__(self, iput, oput):
+        self.stalled = False
+        self.break_found = False
+        self.pc = 96
+        self.cycle = 1
+        self.output = oput
+        self.miss = False
+
+        #MACHINE COMPONENTS
+        self.cache = CACHE(iput)
+        self.ifetch = IF()
+        self.issue = ISSUE()
+        self.reg = REG()
+
+    def print_state(self):  # function to output all states of current cycle
+        self.output.write('--------------------\n')
+        self.output.write('Cycle: ' + self.cycle + '\n\n')
+        self.ifetch.print_prebuffer(self.oput)
+        # stuff printed after fetch goes here
+        self.reg.print_regs(self.output)
+        # stuff printed after registers goes here
+
+    def next_cycle(self):
+        # stuff that happens before instr fetch goes here
+        self.ifetch.fetch(self.cache, self.pc)
+        # stuff that happens after instr fetch goes here
+        self.print_state()
+        if self.miss:
+            self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
+            self.miss = False
+        else:
+            self.pc += 4                    # if no cache miss, increment PC
+
+class IF:
+    def __init__(self):
+        self.pre_issue = [0, 0, 0, 0]
+        self.prebuff_buffer = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
+
+    def find_next_empty_entry(self):
+        for x in range(0, 4):
+            if self.pre_issue[x] == 0:
+                return x
+        return 4
+
+    def fetch(self, cache, pc):         # requests information at address: pc from cache
+        self.prebuff_buffer = cache.ping(pc)
+        if self.prebuff_buffer < 0:     # make sure we hit
+            return -1
+        self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
+        if self.find_next_empty_entry() < 3 and self.prebuff_buffer > 0: # if hit and we have space, get next word also
+            self.prebuff_buffer = cache.ping(pc + 4)
+            self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
+        """Should we be checking here for J or BLTZ instructions?
+            also, does cache identify the break?"""
+
+    def print_prebuffer(self, outfile):
+        outfile.write('Pre-Issue Buffer:\n')
+        for x in range(0, 4):
+            outfile.write('Entry ' + x + ':')
+            if self.pre_issue[x] != 0:
+                outfile.write(':\t[' + inst_to_str(self.pre_issue[x]) + ']\n')
+
+# DRIVER
+
 ifile = ''
 ofile = ''
-
 
 myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
 
@@ -463,24 +339,149 @@ for o, a in myopts:
         elif o == '-o':
                 ofile = a
 
-
-out_file = open(ofile + "_dis.txt", "w")
+out_file_dis = open(ofile + "_dis.txt", "w")
+out_file_pipeline = open(ofile + "_pipeline.txt", "w")
 
 # read each line of file and put in list
 with open(ifile, 'r') as infile:
     data = infile.read()
+
 my_list = data.splitlines()
+#write disassembler output to file
+dis(out_file_dis, my_list)
 
-myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
+#initialize pipeline
+controller = CONTROL(my_list, out_file_pipeline)
 
-for o, a in myopts:
-        if o == '-i':
-                ifile = a
-        elif o == '-o':
-                ofile = a
+controller.ifetch.fetch(controller.cache, controller.pc)
 
-with open(ifile, 'r') as infile:
-    data = infile.read()
-# my_list = data.splitlines()
 
-controller = CONTROL(my_list, ofile)
+
+
+
+
+
+class CACHE:
+    def __init__(self, iput):
+        """Sets is a 3D array -
+            1st D is sets 0 - 3
+            2nd D is which entry (2 total) in the set
+            3rd D is the actual info in this format: [valid bit, dirty bit, tag, word1, word2]
+
+            when looking for shit in the cache, the IF will request information at whatever location the pc is at in the
+            form of: 110000 (for 96)
+
+            The cache interprets the requested address by breaking it down into parts. The lowest 2 bits are not needed
+            at all, since we are incrementing in terms of 4 (so they will always be 0) and the next lowest bit isn't
+            needed either since we are double-word aligned for each entry. The next lowest 2 bits we use to determine
+            which of the 4 sets we are putting to or getting from, and whatever top bits are left
+            are our tag (should be 2 but that only gives us addressing to 127... so might be more ). The tag is used to
+            verify that the item in cache is, in fact, the thing we are looking for, so whenever we put shit to cache we
+            have to set the tag, and whenever we check cache for shit we have to compare the tag bits in our request to
+            the tag bits in that set in our cache.
+
+            LRU (not implemented yet) is set to 0 or 1 to notate which entry was NOT used last. So if we store shit in
+            Entry 0, then our LRU will be 1, so the next time we have to write over something we write in Entry 1"""
+
+        self.sets = [[[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]]
+        self.lru = [0, 0, 0, 0]
+        self.instructions = []  # list containing all instruction items
+        self.memory = []        # list containing all data memory items
+        self.mem = iput
+        self.request_tag = 0    # tag to compare when checking for cache hit
+        self.hit = False
+        self.mem_to_grab = -1   # memory slot/s to be pulled on cache miss
+        self.assocblock = 0     # 0 or 1, location of the block within a set when cache hit is detected
+        self.request_set = 0    # set to check for a cache hit
+        self.tag_mask = 0b1100
+        self.break_line = 96
+        self.split_mem(self.mem)  # split input into instruction and (data) memory lists
+
+    def ping(self, pc):
+        self.request_set = pc >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
+        self.request_tag = pc & self.tag_mask
+        self.request_tag = self.request_tag >> 3
+        if self.sets[self.request_set][0][2] == self.request_tag:       # check first block in matching set for hit
+            self.assocblock = 0
+            self.hit = True
+        elif self.sets[self.request_set][1][2] == self.request_tag:     # check second block
+            self.assocblock = 1
+            self.hit = True
+        if self.hit:
+            if pc % 8 == 0:
+                return self.sets[self.request_set][0]       # if address is %8 then we want the first word in block
+            else:
+                return self.sets[self.request_set][1]       # else we want second word in block
+        else:
+            self.hit = False
+            self.mem_to_grab = pc  # cache miss, update this var and it will be pulled at the very end of the cycle
+            return -1
+
+    def split_mem(self, mem): # populates our lists at initialization
+        is_not_break = True
+        for line in mem:
+            if is_not_break:
+                x = line
+                self.instructions.append(x[0:32])
+                if x == '10000000000000000000000000001101':
+                    is_not_break = False
+                else:
+                    self.break_line += 4  # finds the mem location for BREAK so we can determine which list to pull from
+            else:
+                x = line
+                self.memory.append(x[0:32])
+
+    def grab_mem(self, pc): # pull the requested address from instructions or memory based on break_line value
+        print()
+
+    def lw(self, address):
+        print()
+        # algorithm for hit or miss
+        # if hit return data
+        # if miss, read self.instructions at (pc-96)/4 and pull that data, put it somewhere
+
+    def sw(self, address):
+        print()
+        # algorithm for hit or miss
+        # if hit, do something?
+        # if miss, do something else?
+        # BASED ON TALKING TO EMI, ALL THESE FUNCTIONS MIGHT BE SUPERFLUOUS
+
+
+class ISSUE():
+
+    def send_next(self, pre_issue, alu, mem): # no idea what I was going for here
+        temp = pre_issue[0]
+        for x in range(0, 3):
+            pre_issue[3-x] = pre_issue[2-x]
+        return temp
+    """I'm fairly certain I've confused the functions of the IF and ISSUE components so imma leave this be for now"""
+
+
+# class MEM():
+
+# class ALU():
+
+# class WB:
+
+
+class REG:
+    def __init__(self):
+        self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    def print_regs(self, output):
+        output.write('Registers\nR00:')
+        for x in range(0, 8):
+            output.write('\t' + self.r[x])
+        output.write('R08:')
+        for x in range(8, 16):
+            output.write('\t' + self.r[x])
+        output.write('R16:')
+        for x in range(16, 24):
+            output.write('\t' + self.r[x])
+        output.write('R24:')
+        for x in range(24, 32):
+            output.write('\t' + self.r[x])
+        output.write('\n')
+
+
