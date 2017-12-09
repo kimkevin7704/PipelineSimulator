@@ -3,18 +3,57 @@ import getopt
 
 
 # CLASS DEFINITIONS
-class CACHE(input):
-    def __init__(self, input):
+class CACHE(object):
+    def __init__(self, iput):
         """EXTREMELY NOT SURE HOW TO HANDLE THE CACHE'S SETS"""
-        self.sets = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        self.tags = [0, 0, 0, 0, 0, 0, 0, 0]
-        self.instructions = input.splitlines()
+        self.sets = [[[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]]
+        self.lru = [0, 0, 0, 0]
+        self.instructions = []
+        self.memory = []
+        self.mem = iput
+        self.request_tag = 0
+        self.hit = False
+        self.mem_to_grab = -1
+        self.send_block = [0, 0]
+        self.assocblock = 0
+        self.request_set = 0
+        self.tag_mask = 0b1100
+        self.split_mem(self.mem.splitlines())
 
     def ping(self, pc):
-        print() # dummy instruction because pycharm was bitching about indentation
-        # algorithm for hit or miss
-        # if hit return set
-        # if miss, read self.instructions at (pc-96)/4 and pull next two instr, put them somewhere
+        self.request_set = pc >> 5  # maybe not complete
+        self.request_tag = pc & self.tag_mask
+        self.request_tag = self.request_tag >> 3
+        if self.sets[self.request_set][0][2] == self.request_tag:
+            self.assocblock = 0
+            self.hit = True
+        elif self.sets[self.request_set][1][2] == self.request_tag:
+            self.assocblock = 1
+            self.hit = True
+        if self.hit:
+            if pc % 8 == 0:
+                return self.sets[self.request_set][0]
+            else:
+                return self.sets[self.request_set][1]
+        else:
+            self.mem_to_grab = pc
+            return -1
+
+    def split_mem(self, mem):
+        is_not_break = True
+        for line in mem:
+            if is_not_break:
+                x = line
+                self.instructions.append(x)
+                # if line is a break sequence, switch boolean to stop while loop
+                if x == '10000000000000000000000000001101':
+                    is_not_break = False
+            else:
+                x = line
+                self.memory.append(x)
+
+    def grab_mem(self, pc):
+        print()
 
     def lw(self, address):
         print()
@@ -28,16 +67,18 @@ class CACHE(input):
         # if hit, do something?
         # if miss, do something else?
 
-class CONTROL:
-    def __init__(self, output, input):
+
+class CONTROL(object):
+    def __init__(self, iput, oput):
         self.stalled = False
         self.break_found = False
         self.pc = 96
         self.cycle = 1
-        self.output = output
+        self.output = oput
+        self.miss = False
 
         """MACHINE COMPONENTS"""
-        self.cache = CACHE(input.read())
+        self.cache = CACHE(iput)
         self.ifetch = IF()
         self.issue = ISSUE()
         self.reg = REG()
@@ -45,7 +86,7 @@ class CONTROL:
     def print_state(self):
         self.output.write('--------------------\n')
         self.output.write('Cycle: ' + self.cycle + '\n\n')
-        self.ifetch.print_prebuffer(self.output)
+        self.ifetch.print_prebuffer(self.oput)
         # stuff printed after fetch goes here
         self.reg.print_regs(self.output)
         # stuff printed after registers goes here
@@ -54,13 +95,18 @@ class CONTROL:
         # stuff that happens before instr fetch goes here
         self.ifetch.fetch(self.cache, self.pc)
         # stuff that happens after instr fetch goes here
-        self.pc += 4
         self.print_state()
+        if self.miss:
+            self.cache.grab_mem(self.pc)
+            self.miss = False
+        else:
+            self.pc += 4
 
 
 class IF:
     def __init__(self):
         self.pre_issue = [0, 0, 0, 0]
+        self.prebuff_buffer = 0
 
     def find_next_empty_entry(self):
         for x in range(0, 4):
@@ -69,9 +115,13 @@ class IF:
         return 4
 
     def fetch(self, cache, pc):
-        self.pre_issue[self.find_next_empty_entry] = cache.ping(pc)
-        if self.find_next_empty_entry < 3:
-            self.pre_issue[self.find_next_empty_entry] = cache.ping(pc)
+        self.prebuff_buffer = cache.ping(pc)
+        if self.prebuff_buffer < 0:
+            return -1
+        self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
+        if self.find_next_empty_entry() < 3 and self.prebuff_buffer > 0:
+            self.prebuff_buffer = cache.ping(pc + 4)
+            self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
         """Should we be checking here for J or BLTZ instructions?
             also, does cache identify the break?"""
 
@@ -383,6 +433,16 @@ def dis(output_file, my_list):
 ifile = ''
 ofile = ''
 
+
+myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
+
+for o, a in myopts:
+        if o == '-i':
+                ifile = a
+        elif o == '-o':
+                ofile = a
+
+
 out_file = open(ofile + "_dis.txt", "w")
 
 # read each line of file and put in list
@@ -397,3 +457,9 @@ for o, a in myopts:
                 ifile = a
         elif o == '-o':
                 ofile = a
+
+with open(ifile, 'r') as infile:
+    data = infile.read()
+my_list = data.splitlines()
+
+controller = CONTROL(my_list, ofile)
