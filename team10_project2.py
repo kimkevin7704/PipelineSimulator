@@ -44,13 +44,13 @@ class CACHE(object):
         for line in mem:
             if is_not_break:
                 x = line
-                self.instructions.append(x[0:31])
+                self.instructions.append(x[0:32])
                 # if line is a break sequence, switch boolean to stop while loop
                 if x == '10000000000000000000000000001101':
                     is_not_break = False
             else:
                 x = line
-                self.memory.append(x[0:31])
+                self.memory.append(x[0:32])
 
     def grab_mem(self, pc):
         print()
