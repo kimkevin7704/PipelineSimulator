@@ -36,6 +36,7 @@ class CACHE(object):
         self.assocblock = 0     # 0 or 1, location of the block within a set when cache hit is detected
         self.request_set = 0    # set to check for a cache hit
         self.tag_mask = 0b1100
+        self.break_line = 96
         self.split_mem(self.mem)  # split input into instruction and (data) memory lists
 
     def ping(self, pc):
@@ -64,15 +65,16 @@ class CACHE(object):
             if is_not_break:
                 x = line
                 self.instructions.append(x[0:32])
-                # if line is a break sequence, switch boolean to stop while loop
                 if x == '10000000000000000000000000001101':
                     is_not_break = False
+                else:
+                    self.break_line += 4  # finds the mem location for BREAK so we can determine which list to pull from
             else:
                 x = line
                 self.memory.append(x[0:32])
 
-    def grab_mem(self, pc): # at end of cycle if cache miss, pull the requested address from instructions or memory
-        print()             # THIS SEEMS INCORRECT, HOW DOES IT KNOW WHICH LIST TO GRAB FROM
+    def grab_mem(self, pc): # pull the requested address from instructions or memory based on break_line value
+        print()
 
     def lw(self, address):
         print()
