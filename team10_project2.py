@@ -1,6 +1,28 @@
 import sys
 import getopt
 
+"""
+    KEVIN'S UPDATE NOTES
+    
+    I don't understand the caching shit at all... didn't mess with it
+    LW and SW instructions can be defined with the rest of the instructions. (we have the code already)
+    
+    THINGS ADDED:
+        1. disassembler driver added (writes .txt disassembler output on run)
+        2. will create 2 output files when run
+        3. preissuebuffer, prealu, and premem classes added (initialized in controller)
+        4. IF changed. Need a way to figure out if stalled (after pipeline finished)
+            I think IF should contain all the instruction definition code. (will determine if its a NOP, Break, Jump, etc...)
+        5. Started a driver for our pipeline output. Need to update as we go along
+    
+    THINGS WE NEED:
+        1. fetching shit from cache (when to pull into cache from memory etc)
+        2. way to define instructions from raw instruction and pass info to methods (need IF to differentiate instruction types)
+    
+    If instruction fetching from cache/memory works, I'll probably be able to code the rest of the pipeline ez.
+    hard to write stuff for alu, mem, wb since we need to know the instruction type, registers, etc.
+    
+"""
 # DISASSEMBLER METHODS
 def to_int_2c(bin):
     conversion = int(bin, 2)
