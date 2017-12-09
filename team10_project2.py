@@ -2,7 +2,6 @@ import sys
 import getopt
 
 # DISASSEMBLER METHODS
-
 def to_int_2c(bin):
     conversion = int(bin, 2)
     if bin[0] == '1':
@@ -117,7 +116,6 @@ def inst_to_str(x):
         J()
     else:
         I()
-
 
 def dis(output_file, my_list):
     mem_address = 96
@@ -261,7 +259,6 @@ def dis(output_file, my_list):
             converted_binary = str(to_int_2c(x[1:]))
             output_file.write(x + '\t' + mem_address_str + '\t' + converted_binary + '\n')
 
-
 # CLASS DEFINITIONS FOR PIPELINE
 class CONTROL:
     def __init__(self, iput, oput):
@@ -273,6 +270,7 @@ class CONTROL:
         self.miss = False
 
         #MACHINE COMPONENTS
+        #things we need: pre-issue buffer
         self.cache = CACHE(iput)
         self.ifetch = IF()
         self.issue = ISSUE()
@@ -296,70 +294,6 @@ class CONTROL:
             self.miss = False
         else:
             self.pc += 4                    # if no cache miss, increment PC
-
-class IF:
-    def __init__(self):
-        self.pre_issue = [0, 0, 0, 0]
-        self.prebuff_buffer = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
-
-    def find_next_empty_entry(self):
-        for x in range(0, 4):
-            if self.pre_issue[x] == 0:
-                return x
-        return 4
-
-    def fetch(self, cache, pc):         # requests information at address: pc from cache
-        self.prebuff_buffer = cache.ping(pc)
-        if self.prebuff_buffer < 0:     # make sure we hit
-            return -1
-        self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
-        if self.find_next_empty_entry() < 3 and self.prebuff_buffer > 0: # if hit and we have space, get next word also
-            self.prebuff_buffer = cache.ping(pc + 4)
-            self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
-        """Should we be checking here for J or BLTZ instructions?
-            also, does cache identify the break?"""
-
-    def print_prebuffer(self, outfile):
-        outfile.write('Pre-Issue Buffer:\n')
-        for x in range(0, 4):
-            outfile.write('Entry ' + x + ':')
-            if self.pre_issue[x] != 0:
-                outfile.write(':\t[' + inst_to_str(self.pre_issue[x]) + ']\n')
-
-# DRIVER
-
-ifile = ''
-ofile = ''
-
-myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
-
-for o, a in myopts:
-        if o == '-i':
-                ifile = a
-        elif o == '-o':
-                ofile = a
-
-out_file_dis = open(ofile + "_dis.txt", "w")
-out_file_pipeline = open(ofile + "_pipeline.txt", "w")
-
-# read each line of file and put in list
-with open(ifile, 'r') as infile:
-    data = infile.read()
-
-my_list = data.splitlines()
-#write disassembler output to file
-dis(out_file_dis, my_list)
-
-#initialize pipeline
-controller = CONTROL(my_list, out_file_pipeline)
-
-controller.ifetch.fetch(controller.cache, controller.pc)
-
-
-
-
-
-
 
 class CACHE:
     def __init__(self, iput):
@@ -446,6 +380,99 @@ class CACHE:
         # if hit, do something?
         # if miss, do something else?
         # BASED ON TALKING TO EMI, ALL THESE FUNCTIONS MIGHT BE SUPERFLUOUS
+
+class IF:
+    def __init__(self):
+        self.pre_issue = [0, 0, 0, 0]
+        self.prebuff_buffer = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
+        self.isStall = False            # if fetch unit is stalled, no instruction fetch
+
+
+    def find_next_empty_entry(self):
+        for x in range(0, 4):
+            if self.pre_issue[x] == 0:
+                return x
+        return 4
+
+    def fetch(self, cache, pc):         # requests information at address: pc from cache
+        self.prebuff_buffer = cache.ping(pc)
+        if self.prebuff_buffer < 0:     # make sure we hit
+            return -1
+        self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
+        if self.find_next_empty_entry() < 3 and self.prebuff_buffer > 0: # if hit and we have space, get next word also
+            self.prebuff_buffer = cache.ping(pc + 4)
+            self.pre_issue[self.find_next_empty_entry()] = self.prebuff_buffer
+        """Should we be checking here for J or BLTZ instructions?
+            also, does cache identify the break?"""
+
+    def print_prebuffer(self, outfile):
+        outfile.write('Pre-Issue Buffer:\n')
+        for x in range(0, 4):
+            outfile.write('Entry ' + x + ':')
+            if self.pre_issue[x] != 0:
+                outfile.write(':\t[' + inst_to_str(self.pre_issue[x]) + ']\n')
+
+class PREISSUEBUFFER:
+    def __init__(self):
+        self.buffer = [0,0,0,0]
+        self.isFilled = False       #if filled no instruction fetch
+        self.oneLeft = False        #if one empty slot, only one instruction fetched
+
+    def addToBuffer(self, instruction):
+        self.buffer.pop(0)
+        self.buffer.append(instruction)
+
+    # check if preissue buffer is full, has 1 slot, or more than 1 available
+    # RETURNS NUMBER OF SLOTS TO FILL FOR IF
+    def isFull(self):
+        slotsAvailable = 0
+        for slot in self.buffer:
+            if slot == 0:
+                slotsAvailable += 1
+        if slotsAvailable == 0:
+            return 0
+        if slotsAvailable == 1:
+            return 1
+        else:
+            return 2
+
+
+
+# DRIVER
+
+ifile = ''
+ofile = ''
+
+myopts, args = getopt.getopt(sys.argv[1:], 'i:o:')
+
+for o, a in myopts:
+        if o == '-i':
+                ifile = a
+        elif o == '-o':
+                ofile = a
+
+out_file_dis = open(ofile + "_dis.txt", "w")
+out_file_pipeline = open(ofile + "_pipeline.txt", "w")
+
+# read each line of file and put in list
+with open(ifile, 'r') as infile:
+    data = infile.read()
+
+my_list = data.splitlines()
+#write disassembler output to file
+dis(out_file_dis, my_list)
+
+#initialize pipeline
+controller = CONTROL(my_list, out_file_pipeline)
+
+controller.ifetch.fetch(controller.cache, controller.pc)
+
+
+
+
+
+
+
 
 
 class ISSUE():
