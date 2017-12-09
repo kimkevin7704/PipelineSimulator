@@ -18,7 +18,7 @@ class CACHE(object):
         self.assocblock = 0
         self.request_set = 0
         self.tag_mask = 0b1100
-        self.split_mem(self.mem.splitlines())
+        self.split_mem(self.mem)
 
     def ping(self, pc):
         self.request_set = pc >> 5  # maybe not complete
@@ -460,6 +460,6 @@ for o, a in myopts:
 
 with open(ifile, 'r') as infile:
     data = infile.read()
-my_list = data.splitlines()
+# my_list = data.splitlines()
 
 controller = CONTROL(my_list, ofile)
