@@ -87,7 +87,7 @@ class CACHE(object):
         # algorithm for hit or miss
         # if hit, do something?
         # if miss, do something else?
-
+        # BASED ON TALKING TO EMI, ALL THESE FUNCTIONS MIGHT BE SUPERFLUOUS
 
 class CONTROL(object):
     def __init__(self, iput, oput):
