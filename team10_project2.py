@@ -385,8 +385,11 @@ class CONTROL:
 
     def next_cycle(self):
         # stuff that happens before instr fetch goes here
-        if self.ifetch.fetch(self.cache, self.pc, self.pib) < 0:
+        fetch_code = self.ifetch.fetch(self.cache, self.pc, self.pib)
+        if fetch_code == -1:
             self.miss = True
+        elif fetch_code == 0:
+            self.break_found = True;
         # stuff that happens after instr fetch goes here
         self.print_state()
         if self.miss:
@@ -508,7 +511,7 @@ class IF:
         self.isStall = False    # if fetch unit is stalled, no instruction fetch
 
     # returns number of instructions IF can fetch
-    def canFetch(self, controller):
+    def canFetch(self, pib):
         # if stalled, return 0
         if self.isStall == True:
             return 0
@@ -522,11 +525,32 @@ class IF:
             return 2
 
     def fetch(self, cache, pc, pib):         # requests information at address: pc from cache
+        """SOHAILS NOTES: I'm setting this function to return 4 possible values back to the controller:
+            -1 if its a miss - controller tells cache to grab that mem block at end of cycle
+            -2 if we have a BEQ/BLTZ and we need a stall - NOT IMPLEMENTED IDK WHAT TO DO FOR THIS, HOW DOES IT KNOW IF THE REGISTERS ARE READY OR NOT
+            PC values if we have a jump/jr/branch and registers are ready - controller updates pc value at end of cycle - NOT IMPLEMENTED SEE ABOVE
+            0 if we found BREAK
+
+            note: nops and invalid instructions are just discarded I guess so the controller doesn't need to know bout that   """
+
         self.hitCheck = cache.ping(pc)
         if self.hitCheck < 0:     # make sure we hit
             return -1
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
         # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
+        instr_check = self.instr_check(self.hitCheck)
+        if instr_check[0] == -1: # case: BREAK found
+            return 0
+        elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction
+            self.hitCheck = -1
+        elif instr_check[0] == 1:   # case: jr instr
+            print()
+        elif instr_check[0] == 2:   # case: jump
+            print()
+        elif instr_check[0] == 3:  # case: bltz
+            print()
+        elif instr_check[0] == 4:  # case: beq
+            print()
 
         if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
             self.hitCheck = cache.ping(pc + 4)
@@ -534,12 +558,14 @@ class IF:
 
     def instr_check(self):
         return_field = [0, 0, 0, 0]
+        if self.hitCheck[0] == 0: #invalid instr check
+            return_field[0] = 0
+            return return_field
         if self.hitCheck == '10000000000000000000000000001101':
             return_field[0] = -1
             return return_field
         opcode = self.hitCheck[1:6]
         opcode_parse = int(opcode, 2)
-        x = self.hitCheck
         instruction = self.hitCheck[26:]
         instruction_hex = int(instruction, 2)
 
@@ -556,30 +582,31 @@ class IF:
                 return_field[1] = Rs
                 return return_field
         elif opcode_parse == 2:
-            jump_address = int(x[6:], 2) * 4
+            jump_address = int(self.hitCheck[6:], 2) * 4
             return_field[0] = 2
             return_field[1] = jump_address
             return return_field
         else:
             if opcode_parse == 1:
                 # bltz Rs, label
-                Rs = int(x[6:11], 2)
-                label = to_int_2c(x[16:])
+                Rs = int(self.hitCheck[6:11], 2)
+                label = to_int_2c(self.hitCheck[16:])
                 return_field[0] = 3
                 return_field[1] = Rs
                 return_field[2] = label
                 return return_field
             elif opcode_parse == 4:
                 # beq Rs, Rt, label
-                Rt = str(int(x[11:16], 2))
-                Rs = str(int(x[6:11], 2))
-                label = str(to_int_2c(x[16:]))
-                return_field[0] = 3
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                label = to_int_2c(self.hitCheck[16:])
+                return_field[0] = 4
                 return_field[1] = Rs
                 return_field[2] = Rt
                 return_field[3] = label
                 return return_field
-
+        return_field[0] = 5
+        return return_field
 
     # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
 
