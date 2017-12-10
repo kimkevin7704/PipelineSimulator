@@ -70,11 +70,14 @@ import getopt
     hard to write stuff for alu, mem, wb since we need to know the instruction type, registers, etc.
 """
 # DISASSEMBLER METHODS
+
+
 def to_int_2c(bin):
     conversion = int(bin, 2)
     if bin[0] == '1':
         conversion -= 2 ** len(bin)
     return conversion
+
 
 def inst_to_str(x):
 
@@ -185,6 +188,7 @@ def inst_to_str(x):
         J()
     else:
         I()
+
 
 def dis(output_file, my_list):
     mem_address = 96
@@ -328,7 +332,30 @@ def dis(output_file, my_list):
             converted_binary = str(to_int_2c(x[1:]))
             output_file.write(x + '\t' + mem_address_str + '\t' + converted_binary + '\n')
 
+
 # CLASS DEFINITIONS FOR PIPELINE
+
+
+class REG:
+    def __init__(self):
+        self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    def print_regs(self, output):
+        output.write('Registers\nR00:')
+        for x in range(0, 8):
+            output.write('\t' + str(self.r[x]))
+        output.write('R08:')
+        for x in range(8, 16):
+            output.write('\t' + str(self.r[x]))
+        output.write('R16:')
+        for x in range(16, 24):
+            output.write('\t' + str(self.r[x]))
+        output.write('R24:')
+        for x in range(24, 32):
+            output.write('\t' + str(self.r[x]))
+        output.write('\n')
+
+
 class CONTROL:
     def __init__(self, iput, oput):
         self.stalled = False
@@ -350,15 +377,16 @@ class CONTROL:
 
     def print_state(self):  # function to output all states of current cycle
         self.output.write('--------------------\n')
-        self.output.write('Cycle: ' + self.cycle + '\n\n')
-        self.ifetch.print_prebuffer(self.oput)
+        self.output.write('Cycle: ' + str(self.cycle) + '\n\n')
+        # self.ifetch.print_prebuffer(self.oput)
         # stuff printed after fetch goes here
         self.reg.print_regs(self.output)
         # stuff printed after registers goes here
 
     def next_cycle(self):
         # stuff that happens before instr fetch goes here
-        self.ifetch.fetch(self.cache, self.pc)
+        if self.ifetch.fetch(self.cache, self.pc) < 0:
+            self.miss = True
         # stuff that happens after instr fetch goes here
         self.print_state()
         if self.miss:
@@ -390,37 +418,38 @@ class CACHE:
             Entry 0, then our LRU will be 1, so the next time we have to write over something we write in Entry 1"""
 
         self.sets = [[[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]]
-        self.lru = [0, 0, 0, 0]
+        self.LRU = [0, 0, 0, 0]
         self.instructions = []  # list containing all instruction items
         self.memory = []        # list containing all data memory items
         self.mem = iput
-        self.request_tag = 0    # tag to compare when checking for cache hit
+        #self.request_tag = 0    # tag to compare when checking for cache hit
         self.hit = False
-        self.mem_to_grab = -1   # memory slot/s to be pulled on cache miss
+        # self.mem_to_grab = -1   # memory slot/s to be pulled on cache miss
         self.assocblock = 0     # 0 or 1, location of the block within a set when cache hit is detected
-        self.request_set = 0    # set to check for a cache hit
-        self.tag_mask = 0b1100
+        #self.request_set = 0    # set to check for a cache hit
+        self.set_mask = 0b11000
         self.break_line = 96
+        self.num_instructions = 0
         self.split_mem(self.mem)  # split input into instruction and (data) memory lists
 
     def ping(self, pc):
-        self.request_set = pc >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
-        self.request_tag = pc & self.tag_mask
-        self.request_tag = self.request_tag >> 3
-        if self.sets[self.request_set][0][2] == self.request_tag:       # check first block in matching set for hit
+        request_tag = pc >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
+        request_set = pc & self.set_mask
+        request_set = request_tag >> 3
+        if self.sets[request_set][0][2] == request_tag:       # check first block in matching set for hit
             self.assocblock = 0
             self.hit = True
-        elif self.sets[self.request_set][1][2] == self.request_tag:     # check second block
+        elif self.sets[request_set][1][2] == request_tag:     # check second block
             self.assocblock = 1
             self.hit = True
         if self.hit:
             if pc % 8 == 0:
-                return self.sets[self.request_set][0]       # if address is %8 then we want the first word in block
+                return self.sets[request_set][self.assocblock][3]       # if address is %8 then we want the first word in block
             else:
-                return self.sets[self.request_set][1]       # else we want second word in block
+                return self.sets[request_set][self.assocblock][4]       # else we want second word in block
         else:
             self.hit = False
-            self.mem_to_grab = pc  # cache miss, update this var and it will be pulled at the very end of the cycle
+            # self.mem_to_grab = pc  # cache miss, update this var and it will be pulled at the very end of the cycle
             return -1
 
     def split_mem(self, mem): # populates our lists at initialization
@@ -432,13 +461,48 @@ class CACHE:
                 if x == '10000000000000000000000000001101':
                     is_not_break = False
                 else:
+                    self.num_instructions += 1
                     self.break_line += 4  # finds the mem location for BREAK so we can determine which list to pull from
+
             else:
                 x = line
                 self.memory.append(x[0:32])
 
     def grab_mem(self, pc): # pull the requested address from instructions or memory based on break_line value
-        print()
+        block_to_grab = 0
+        block_to_grab2 = (pc - 96)/4
+        block_tag = pc >> 5
+        block_set = pc & self.set_mask
+        block_set = block_set >> 3
+        if pc < self.break_line:
+            block_to_grab = self.instructions[int(block_to_grab2)]
+            block_to_grab2 = self.instructions[int(block_to_grab2) + 1]
+        else:
+            block_to_grab = self.memory[block_to_grab2 - self.num_instructions]
+            block_to_grab2 = self.memory[block_to_grab2 - self.num_instructions + 1]
+
+        if self.sets[block_set][self.LRU[block_set]][0] == 1:
+            self.write_back(block_set, block_tag, self.sets[block_set][self.LRU[block_set]][3], self.sets[block_set][self.LRU[block_set]][4])
+        self.sets[block_set][self.LRU[block_set]][0] = 1
+        self.sets[block_set][self.LRU[block_set]][2] = block_tag
+        self.sets[block_set][self.LRU[block_set]][3] = block_to_grab
+        self.sets[block_set][self.LRU[block_set]][4] = block_to_grab2
+        if self.LRU[block_set] == 1:
+            self.LRU[block_set] = 0
+        else:
+            self.LRU[block_set] = 1
+
+    def write_back(self, set, tag, word1, word2):
+        mem_to_write_to = (set << 5) + (tag << 3)
+        mem_to_write_to = (mem_to_write_to - 96)/4
+        if mem_to_write_to < self.break_line:
+            self.instructions[mem_to_write_to] = word1
+            self.instructions[mem_to_write_to + 1] = word2
+        else:
+            self.memory[(mem_to_write_to - self.num_instructions)] = word1
+            self.memory[(mem_to_write_to - self.num_instructions) + 1] = word2
+
+
 
 class IF:
     def __init__(self):
@@ -459,7 +523,7 @@ class IF:
         else:
             return 2
 
-    def fetch(self, cache, pc, controller):         # requests information at address: pc from cache
+    def fetch(self, cache, pc):         # requests information at address: pc from cache
         self.hitCheck = cache.ping(pc)
         if self.hitCheck < 0:     # make sure we hit
             return -1
@@ -519,11 +583,11 @@ class ISSUE():
             if controller.pib[3-x] != 0:
                 instructionToSend = controller.pib[3 - x]
                 #CHECK IF LW OR SW
-                    controller.preMEM.addToBuffer(instructionToSend)
-                    maxSendPerCC += 1
+                controller.preMEM.addToBuffer(instructionToSend)
+                maxSendPerCC += 1
                 #ELSE
-                    controller.preALU.addToBuffer(instructionToSend)
-                    maxSendPerCC += 1
+                controller.preALU.addToBuffer(instructionToSend)
+                maxSendPerCC += 1
 
 class PREALU:
     def __init__(self):
@@ -607,6 +671,8 @@ dis(out_file_dis, my_list)
 
 #initialize pipeline
 controller = CONTROL(my_list, out_file_pipeline)
+controller.next_cycle()
+controller.next_cycle()
 
 #start Clock Cycle
 
@@ -616,7 +682,7 @@ controller = CONTROL(my_list, out_file_pipeline)
 #check: 1. stall 2. PIB room 3. instruction type
 if controller.ifetch.isStall == False:
     if controller.pib.isFull() > 0:
-        # if
+        print()# if
 
 
 
@@ -635,23 +701,6 @@ if controller.ifetch.isStall == False:
 # class WB:
 
 
-class REG:
-    def __init__(self):
-        self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-    def print_regs(self, output):
-        output.write('Registers\nR00:')
-        for x in range(0, 8):
-            output.write('\t' + self.r[x])
-        output.write('R08:')
-        for x in range(8, 16):
-            output.write('\t' + self.r[x])
-        output.write('R16:')
-        for x in range(16, 24):
-            output.write('\t' + self.r[x])
-        output.write('R24:')
-        for x in range(24, 32):
-            output.write('\t' + self.r[x])
-        output.write('\n')
 
 
