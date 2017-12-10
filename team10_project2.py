@@ -344,13 +344,13 @@ class REG:
         output.write('Registers\nR00:')
         for x in range(0, 8):
             output.write('\t' + str(self.r[x]))
-        output.write('R08:')
+        output.write('\nR08:')
         for x in range(8, 16):
             output.write('\t' + str(self.r[x]))
-        output.write('R16:')
+        output.write('\nR16:')
         for x in range(16, 24):
             output.write('\t' + str(self.r[x]))
-        output.write('R24:')
+        output.write('\nR24:')
         for x in range(24, 32):
             output.write('\t' + str(self.r[x]))
         output.write('\n')
@@ -385,7 +385,7 @@ class CONTROL:
 
     def next_cycle(self):
         # stuff that happens before instr fetch goes here
-        if self.ifetch.fetch(self.cache, self.pc) < 0:
+        if self.ifetch.fetch(self.cache, self.pc, self.pib) < 0:
             self.miss = True
         # stuff that happens after instr fetch goes here
         self.print_state()
@@ -422,11 +422,9 @@ class CACHE:
         self.instructions = []  # list containing all instruction items
         self.memory = []        # list containing all data memory items
         self.mem = iput
-        #self.request_tag = 0    # tag to compare when checking for cache hit
         self.hit = False
         # self.mem_to_grab = -1   # memory slot/s to be pulled on cache miss
         self.assocblock = 0     # 0 or 1, location of the block within a set when cache hit is detected
-        #self.request_set = 0    # set to check for a cache hit
         self.set_mask = 0b11000
         self.break_line = 96
         self.num_instructions = 0
@@ -506,8 +504,8 @@ class CACHE:
 
 class IF:
     def __init__(self):
-        self.hitCheck = 0         # in case of cache miss, returns -1 to controller so that it doesnt increment pc
-        self.isStall = False            # if fetch unit is stalled, no instruction fetch
+        self.hitCheck = 0       # in case of cache miss, returns -1 to controller so that it doesnt increment pc
+        self.isStall = False    # if fetch unit is stalled, no instruction fetch
 
     # returns number of instructions IF can fetch
     def canFetch(self, controller):
@@ -523,23 +521,71 @@ class IF:
         else:
             return 2
 
-    def fetch(self, cache, pc):         # requests information at address: pc from cache
+    def fetch(self, cache, pc, pib):         # requests information at address: pc from cache
         self.hitCheck = cache.ping(pc)
         if self.hitCheck < 0:     # make sure we hit
             return -1
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
-        controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
-        if controller.pib.isFull() > 0 and cache.ping(pc + 4) > 0: # if hit and we have space, get next word also
-            self.hitCheck = cache.ping(pc + 4)
-            controller.pib.addToBuffer(self.hitCheck)
-        """Should we be checking here for J or BLTZ instructions?
-            also, does cache identify the break?"""
+        # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
 
-        # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
+        if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
+            self.hitCheck = cache.ping(pc + 4)
+            pib.addToBuffer(self.hitCheck)
+
+    def instr_check(self):
+        return_field = [0, 0, 0, 0]
+        if self.hitCheck == '10000000000000000000000000001101':
+            return_field[0] = -1
+            return return_field
+        opcode = self.hitCheck[1:6]
+        opcode_parse = int(opcode, 2)
+        x = self.hitCheck
+        instruction = self.hitCheck[26:]
+        instruction_hex = int(instruction, 2)
+
+        if opcode_parse == 0:
+            if instruction_hex == 0:
+                # if all 0 is NOP
+                if self.hitCheck == '10000000000000000000000000000000':
+                    return_field[0] = 0
+                    return return_field
+            elif instruction_hex == 8:
+                # jr Rs
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 1
+                return_field[1] = Rs
+                return return_field
+        elif opcode_parse == 2:
+            jump_address = int(x[6:], 2) * 4
+            return_field[0] = 2
+            return_field[1] = jump_address
+            return return_field
+        else:
+            if opcode_parse == 1:
+                # bltz Rs, label
+                Rs = int(x[6:11], 2)
+                label = to_int_2c(x[16:])
+                return_field[0] = 3
+                return_field[1] = Rs
+                return_field[2] = label
+                return return_field
+            elif opcode_parse == 4:
+                # beq Rs, Rt, label
+                Rt = str(int(x[11:16], 2))
+                Rs = str(int(x[6:11], 2))
+                label = str(to_int_2c(x[16:]))
+                return_field[0] = 3
+                return_field[1] = Rs
+                return_field[2] = Rt
+                return_field[3] = label
+                return return_field
+
+
+    # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
 
 class PREISSUEBUFFER:
     def __init__(self):
-        self.buffer = [0,0,0,0]
+        self.buffer = [0, 0, 0, 0]
 
     # add instruction to PIB [0,0,0,0] --> [0,0,0,I1]
     def addToBuffer(self, instruction):
@@ -551,7 +597,7 @@ class PREISSUEBUFFER:
         # if first in line of PIB is occupied, POP and add 0 at end of line
         if self.buffer[3] != 0:
             self.buffer.pop(3)
-            self.buffer.insert(0,"0")
+            self.buffer.insert(0, "0")
 
     # check if preissue buffer is full, has 1 slot, or more than 1 available
     # RETURNS NUMBER OF SLOTS TO FILL FOR IF
