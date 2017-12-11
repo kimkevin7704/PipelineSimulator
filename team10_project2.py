@@ -532,19 +532,39 @@ class IF:
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
         # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
         instr_check = self.instr_check(self.hitCheck)
-        if instr_check[0] == -1: # case: BREAK found [0,0,0,0]
+        if instr_check[0] == -1: # case: BREAK found [-1,0,0,0]
             return 0
-        elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [-1,0,0,0]
+        elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [0,0,0,0]
             self.hitCheck = -1
         elif instr_check[0] == 1:   # case: jr instr [1,rs,0,0]
             print()
-        elif instr_check[0] == 2:   # case: jump [2,jump_address]
+        elif instr_check[0] == 2:   # case: jump [2,jump_address,0,0]
             print()
-        elif instr_check[0] == 3:  # case: bltz
+        elif instr_check[0] == 3:  # case: bltz [3,rs,label,0]
             print()
-        elif instr_check[0] == 4:  # case: beq
+        elif instr_check[0] == 4:  # case: beq [4,rs,rt,label]
             print()
         elif instr_check[0] == 5:  # case: sll [5, rd, rt, shamt]
+            print()
+        elif instr_check[0] == 6:  # case: sub [6, rd, rt, rs]
+            print()
+        elif instr_check[0] == 7:  # case: add [7, rd, rt, rs]
+            print()
+        elif instr_check[0] == 8:  # case: srl [8, rd, rt, shamt]
+            print()
+        elif instr_check[0] == 9:  # case: and [9, rd, rt, rs]
+            print()
+        elif instr_check[0] == 10:  # case: or [10, rd, rt, rs]
+            print()
+        elif instr_check[0] == 11:  # case: movz [11, rd, rt, rs]
+            print()
+        elif instr_check[0] == 12:  # case: mul [12, rd, rt, rs]
+            print()
+        elif instr_check[0] == 13:  # case: addi [13, rt, rs, imm]
+            print()
+        elif instr_check[0] == 14:  # case: sw [14, rt, rs, BOffset]
+            print()
+        elif instr_check[0] == 15:  # case: lw [15, rt, rs, BOffset]
             print()
 
         if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
@@ -585,6 +605,66 @@ class IF:
                 return_field[0] = 1
                 return_field[1] = Rs
                 return return_field
+            elif instruction_hex == 34:
+                #sub Rd, Rs, Rt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 6
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Rs
+                return return_field
+            elif instruction_hex == 32:
+                #add Rd, Rs, Rt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 7
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Rs
+                return return_field
+            elif instruction_hex == 2:
+                #srl Rd, Rs, Shamt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Shamt = int(self.hitCheck[6:11], 2)
+                return_field[0] = 8
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Shamt
+                return return_field
+            elif instruction_hex == 36:
+                #and Rd, Rs, Rt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 9
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Rs
+                return return_field
+            elif instruction_hex == 37:
+                #or rd, rs, rt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 10
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Rs
+                return return_field
+            elif instruction_hex == 10:
+                #movz rd, rs, rt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 11
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Rs
+                return return_field
 
         elif opcode_parse == 2:
             jump_address = int(self.hitCheck[6:], 2) * 4
@@ -592,7 +672,7 @@ class IF:
             return_field[1] = jump_address
             return return_field
         else:
-            if opcode_parse == 1:
+            if instruction_hex == 1:
                 # bltz Rs, label
                 Rs = int(self.hitCheck[6:11], 2)
                 label = to_int_2c(self.hitCheck[16:])
@@ -600,7 +680,7 @@ class IF:
                 return_field[1] = Rs
                 return_field[2] = label
                 return return_field
-            elif opcode_parse == 4:
+            elif instruction_hex == 4:
                 # beq Rs, Rt, label
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
@@ -610,7 +690,44 @@ class IF:
                 return_field[2] = Rt
                 return_field[3] = label
                 return return_field
-        return_field[0] = 5
+            elif instruction_hex == 28:
+                #mul rd, rs, rt
+                Rd = int(self.hitCheck[16:21], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 12
+                return_field[1] = Rd
+                return_field[2] = Rt
+                return_field[3] = Rs
+                return return_field
+            elif instruction_hex == 8:
+                #addi Rt, Rs, imm
+                Imm = to_int_2c(self.hitCheck[16:], 2)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                return_field[0] = 13
+                return_field[1] = Rt
+                return_field[2] = Rs
+                return_field[3] = Imm
+                return return_field
+            elif instruction_hex == 11:
+                # sw Rt, BOffset(Rs)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                BOffset = to_int_2c(self.hitCheck[16:])
+                return_field[0] = 14
+                return_field[1] = Rt
+                return_field[2] = Rs
+                return_field[3] = BOffset
+            elif instruction_hex == 3:
+                # lw Rt, Boffset(Rs)
+                Rt = int(self.hitCheck[11:16], 2)
+                Rs = int(self.hitCheck[6:11], 2)
+                BOffset = to_int_2c(self.hitCheck[16:])
+                return_field[0] = 15
+                return_field[1] = Rt
+                return_field[2] = Rs
+                return_field[3] = BOffset
         return return_field
 
     # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
