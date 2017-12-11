@@ -307,7 +307,6 @@ class CONTROL:
         self.pc = 96
         self.cycle = 1
         self.output = oput
-        self.miss = False
 
         #MACHINE COMPONENTS
         #things we need: pre-issue buffer
@@ -319,6 +318,9 @@ class CONTROL:
         self.preMEM = PREMEM()
         self.reg = REG()
         self.alu = ALU()
+        self.mem = MEM(self.preMEM, self.cache)
+        self.postmem = POSTMEM(self.mem)
+        self.wb = WB(self.reg, self.postmem)
 
     def print_state(self):  # function to output all states of current cycle
         self.output.write('--------------------\n')
@@ -329,19 +331,30 @@ class CONTROL:
         # stuff printed after registers goes here
 
     def next_cycle(self):
+        mem_miss = False
+        fetch_miss = False
         # stuff that happens before instr fetch goes here
-        fetch_code = self.ifetch.fetch(self.cache, self.pc, self.pib)
-        if fetch_code == -1:
-            self.miss = True
-        elif fetch_code == 0:
-            self.break_found = True;
+        mem_code = self.mem.instr_grab(self.reg)
+        if mem_code > 0:  # function above returns the target address if there's a cache miss from MEM unit
+            mem_miss = True
+            self.stalled = True
+        else:             # with this algorithm, a LW will only stall for one fetch, so not sure if this is correct
+            self.stalled = False
+        if not self.stalled:
+            fetch_code = self.ifetch.fetch(self.cache, self.pc, self.pib)
+            if fetch_code == -1:
+                fetch_miss = True
+            elif fetch_code == 0:
+                self.break_found = True
         # stuff that happens after instr fetch goes here
+        """THIS IS NOT CORRECT, WE'RE SUPPOSED TO BE CALLING SHIT IN REVERSE ORDER OF THE PIPELINE"""
         self.issue.send_next(self)
         self.alu.execInstr(self, self)
         self.print_state()
-        if self.miss:
+        if mem_miss:
+            self.cache.grab_mem(mem_code)
+        if fetch_miss:
             self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
-            self.miss = False
         else:
             self.pc += 4                    # if no cache miss, increment PC
 
@@ -400,7 +413,26 @@ class CACHE:
             # self.mem_to_grab = pc  # cache miss, update this var and it will be pulled at the very end of the cycle
             return -1
 
-    def split_mem(self, mem): # populates our lists at initialization
+    def sw(self, target, value):
+        request_tag = target >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
+        request_set = target & self.set_mask
+        request_set = request_tag >> 3
+        target_entry = 4
+        if target % 8 == 0:
+            target_entry = 4  # if address is %8 then we want the first word in block
+        self.sets[request_set][self.assocblock][2] = 1
+        self.sets[request_set][self.assocblock][target_entry] = int(value, 2)  # else we want second word in block
+
+    def lw(self, target):
+        request_tag = target >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
+        request_set = target & self.set_mask
+        request_set = request_tag >> 3
+        target_entry = 4
+        if target % 8 == 0:
+            target_entry = 4  # if address is %8 then we want the first word in block
+        return int(self.sets[request_set][self.assocblock][target_entry])  # else we want second word in block
+
+    def split_mem(self, mem):  # populates our lists at initialization
         is_not_break = True
         for line in mem:
             if is_not_break:
@@ -416,7 +448,7 @@ class CACHE:
                 x = line
                 self.memory.append(x[0:32])
 
-    def grab_mem(self, pc): # pull the requested address from instructions or memory based on break_line value
+    def grab_mem(self, pc):  # pull the requested address from instructions or memory based on break_line value
         block_to_grab = 0
         block_to_grab2 = (pc - 96)/4
         block_tag = pc >> 5
@@ -722,6 +754,7 @@ class IF:
                 return_field[1] = Rt
                 return_field[2] = Rs
                 return_field[3] = BOffset
+
         return return_field
 
     # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
@@ -782,7 +815,7 @@ class ISSUE():
 
 class PREALU:
     def __init__(self):
-        self.buffer = [0,0]
+        self.buffer = [0, 0]
 
     def isFull(self):
         slotsAvailable = 0
@@ -813,25 +846,25 @@ class ALU:
         instr = control.preALU.buffer[1]
         if instr != 0:
             control.preALU.removeFromBuffer()
-            if instr[0] == 5: # case: sll [5, rd, rt, shamt]
-                control.reg.r[instr[1]] = control.reg.r[instr[2]] << instr[3]
-            elif instr[0] == 6: # case: sub [6, rd, rt, rs]
-                control.reg.r[instr[1]] = control.reg.r[instr[3]] - control.reg.r[instr[2]]
-            elif instr[0] == 7: # case: add [7, rd, rt, rs]
-                control.reg.r[instr[1]] = control.reg.r[instr[3]] + control.reg.r[instr[2]]
-            elif instr[0] == 8: # case: srl [8, rd, rt, shamt]
-                control.reg.r[instr[1]] = control.reg.r[instr[2]] << instr[3]
-            elif instr[0] == 9: # case: and [9, rd, rt, rs]
-                control.reg.r[instr[1]] = control.reg.r[instr[3]] & control.reg.r[instr[2]]
-            elif instr[0] == 10: # case: or [10, rd, rt, rs]
-                control.reg.r[instr[1]] = control.reg.r[instr[3]] | control.reg.r[instr[2]]
-            elif instr[0] == 11: # case: movz [11, rd, rt, rs]
+            if instr[0] == 5:  # case: sll [5, rd, rt, shamt]
+                instr.append(control.reg.r[instr[2]] << instr[3])
+            elif instr[0] == 6:  # case: sub [6, rd, rt, rs]
+                instr.append(control.reg.r[instr[3]] - control.reg.r[instr[2]])
+            elif instr[0] == 7:  # case: add [7, rd, rt, rs]
+                instr.append(control.reg.r[instr[3]] + control.reg.r[instr[2]])
+            elif instr[0] == 8:  # case: srl [8, rd, rt, shamt]
+                instr.append(control.reg.r[instr[2]] << instr[3])
+            elif instr[0] == 9:  # case: and [9, rd, rt, rs]
+                instr.append(control.reg.r[instr[3]] & control.reg.r[instr[2]])
+            elif instr[0] == 10:  # case: or [10, rd, rt, rs]
+                instr.append(control.reg.r[instr[3]] | control.reg.r[instr[2]])
+            elif instr[0] == 11:  # case: movz [11, rd, rt, rs]
                 if control.reg.r[instr[2]] == 0:
-                    control.reg.r[instr[1]] = control.reg.r[instr[3]]
-            elif instr[0] == 12: # case: mul [12, rd, rt, rs]
-                control.reg.r[instr[1]] = control.reg.r[instr[3]] * control.reg.r[instr[2]]
-            elif instr[0] == 13: # case: addi [13, rt, rs, imm]
-                control.reg.r[instr[1]] = control.reg.r[instr[2]] + control.reg.r[instr[3]]
+                    instr.append(control.reg.r[instr[3]])
+            elif instr[0] == 12:  # case: mul [12, rd, rt, rs]
+                instr.append(control.reg.r[instr[3]] * control.reg.r[instr[2]])
+            elif instr[0] == 13:  # case: addi [13, rt, rs, imm]
+                instr.append(control.reg.r[instr[2]] + control.reg.r[instr[3]])
 
 class PREMEM:
     def __init__(self):
@@ -861,9 +894,64 @@ class PREMEM:
             self.buffer.pop(1)
             self.buffer.insert(0,"0")
 
+    def ping(self):
+        return self.buffer.index(0)
+
+
+class MEM(object):
+    """     elif instr_check[0] == 14:  # case: sw [14, rt, rs, BOffset]
+            pib.addToBuffer(instr_check)
+        elif instr_check[0] == 15:  # case: lw [15, rt, rs, BOffset]
+        Rt = offsef(Rs)"""
+
+    def __init__(self, premem, cache):
+        self.premem = premem
+        self.cache = cache
+
+    def instr_grab(self, reg, postmem):
+        pm_check = self.premem.ping()
+        target = reg.r[pm_check[2]] + to_int_2c(pm_check[3]) # calculates target address from contents of register[rs] + offset
+        cache_check = self.cache.ping(target)
+        if cache_check > 0: # case cache hit
+            self.premem.removeFromBuffer()
+            if pm_check[0] == 14:   # case SW
+                self.cache.sw(target, pm_check[1])
+            else:                   # case LW
+                pm_check.append(self.cache.lw(target))
+                postmem.get_instr()
+            return -1
+        else: # case cache miss
+            return target
+
+class POSTMEM(object):
+    def __init__(self, mem):
+        self.mem = mem
+        self.queue = []
+
+    def get_instr(self, instr):
+        self.queue = instr
+
+    def return_instr(self):
+        if self.queue == []:
+            return [-1]
+        else:
+            temp = self.queue
+            self.queue = []
+            return temp
+
+
+class WB(object):
+    def __init__(self, reg, postmem):
+        self.reg = reg
+        self.postmem = postmem
+
+    def grab_and_write(self):
+        instr =  self.postmem.return_instr()
+        if instr[0] >= 0:
+            self.reg.r[instr[1]] = instr[4]
+
 
 # DRIVER
-
 ifile = ''
 ofile = ''
 
@@ -901,19 +989,6 @@ if controller.ifetch.isStall == False:
     if controller.pib.isFull() > 0:
         print()# if
 
-
-
-
-
-
-
-
-
-
-
-# class MEM():
-
-# class ALU():
 
 # class WB:
 
