@@ -537,35 +537,37 @@ class IF:
         elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [0,0,0,0]
             self.hitCheck = -1
         elif instr_check[0] == 1:   # case: jr instr [1,rs,0,0]
-            print()
+            pc = self.reg.r[instr_check[1]] - 4 # need to check if register is ready
         elif instr_check[0] == 2:   # case: jump [2,jump_address,0,0]
-            print()
+            pc = int(instr_check[1]) - 4
         elif instr_check[0] == 3:  # case: bltz [3,rs,label,0]
-            print()
+            if(self.reg.r[instr_check[1]] < 0):
+                pc = pc + int(instr_check[2])
         elif instr_check[0] == 4:  # case: beq [4,rs,rt,label]
-            print()
+            if(self.reg.r[instr_check[1]] == self.reg.r[instr_check[2]]):
+                pc = pc + int(instr_check[3])
         elif instr_check[0] == 5:  # case: sll [5, rd, rt, shamt]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 6:  # case: sub [6, rd, rt, rs]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 7:  # case: add [7, rd, rt, rs]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 8:  # case: srl [8, rd, rt, shamt]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 9:  # case: and [9, rd, rt, rs]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 10:  # case: or [10, rd, rt, rs]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 11:  # case: movz [11, rd, rt, rs]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 12:  # case: mul [12, rd, rt, rs]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 13:  # case: addi [13, rt, rs, imm]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 14:  # case: sw [14, rt, rs, BOffset]
-            print()
+            pib.addToBuffer(instr_check)
         elif instr_check[0] == 15:  # case: lw [15, rt, rs, BOffset]
-            print()
+            pib.addToBuffer(instr_check)
 
         if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
             self.hitCheck = cache.ping(pc + 4)
