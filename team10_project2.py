@@ -4,70 +4,19 @@ import getopt
 """
     KEVIN'S UPDATE NOTES
     
-    I don't understand tags, lru shit at all... not sure how to grab instructions other than the straight binary string from the input file
-    If you know how to pull the instruction, registers/address, tag, set and all that info from the binary instruction in memory, we need that to go forward
+    IF now sends instructions to preissue buffer with relevant info
+    preissue buffer sends to issue
+    issue sorts and sends to preALU or preMEM
+    ALU takes from preALU and does calculation
     
-    LW and SW instructions can be defined with the rest of the instructions. (we have the code already but I don't know how to apply it when
-    we fetch instructions from cache/memory)
+    as of now, ALU is changing the registers in our register array. this should happen
+    in the WB component. can fix later
     
-    CODE FOR INSTRUCTIONS (mem-address will be based on pc? Regis will be from the REG class):
-    def JUMP(jAddress):
-        global mem_address
-        mem_address = int(jAddress) - 4
-
-    def JR(rs):
-            global mem_address
-            mem_address = R[int(rs)] - 4
+    premem gonna be hard cuz it involves a lot of cache hit shit that i dont get
     
-    def BEQ(rs, rt, label):
-            if Regis[int(rs)] == Regis[int(rt)]:
-                    global mem_address
-                    mem_address = mem_address + int(label)
-    def BLTZ(rs, label):
-            if int(Regis[int(rs)]) < 0:
-                    global mem_address
-                    mem_address = mem_address + int(label)
+    hazard checks aren't in... will prbly add after all components coded
     
-    def ADD(rd, rs, rt):
-            Regis[int(rd)] = Regis[int(rs)] + Regis[int(rt)]
-    def ADDI(rt, rs, imm):
-            Regis[int(rt)] = Regis[int(rs)] + int(imm)
-    def SUB(rd, rs, rt):
-            Regis[int(rd)] = Regis[int(rs)] - Regis[int(rt)]
-    def SW(rs, rt, bOffset):
-            pMem[int(((int(bOffset) + int(Regis[int(rs)])) - 172)/4)] = int(Regis[int(rt)])
-    def LW(rs, rt, bOffset):
-            Regis[int(rt)] = pMem[int(((int(bOffset) + int(Regis[int(rs)])) - 172)/4)]
-    def SLL(rd, rs, shamt):
-            Regis[int(rd)] = int(str(Regis[int(rs)]), 10) << int(shamt)
-    def SRL(rd, rs, shamt):
-            Regis[int(rd)] = int(str(Regis[int(rs)]), 10) << int(shamt)      
-    def MUL(rd, rs, rt):
-            Regis[int(rd)] = Regis[int(rs)] * Regis[int(rt)]
-    def AND(rd, rs, rt):
-            Regis[int(rd)] = Regis[int(rs)] & Regis[int(rt)]
-    def OR(rd, rs, rt):
-            Regis[int(rd)] = Regis[int(rs)] | Regis[int(rt)]
-    def MOVZ(rd, rs, rt):
-            if Regis[int(rt)] == int(0):
-                    Regis[int(rd)] = Regis[int(rs)]
-    def NOP():
-    
-    
-    THINGS ADDED:
-        1. disassembler driver added (writes .txt disassembler output on run)
-        2. will create 2 output files when run
-        3. preissuebuffer, prealu, and premem classes added (initialized in controller)
-        4. IF changed. Need a way to figure out if stalled (after pipeline finished)
-            I think IF should contain all the instruction definition code. (will determine if its a NOP, Break, Jump, etc...)
-        5. Started a driver for our pipeline output. Need to update as we go along
-    
-    THINGS WE NEED:
-        1. fetching shit from cache
-        2. way to define instructions from raw instruction and pass info to methods (need IF to differentiate instruction types)
-    
-    If instruction fetching from cache/memory works, I'll probably be able to code the rest of the pipeline ez.
-    hard to write stuff for alu, mem, wb since we need to know the instruction type, registers, etc.
+    pc changes for branch instructions added
 """
 # DISASSEMBLER METHODS
 
@@ -369,6 +318,7 @@ class CONTROL:
         self.preALU = PREALU()
         self.preMEM = PREMEM()
         self.reg = REG()
+        self.alu = ALU()
 
     def print_state(self):  # function to output all states of current cycle
         self.output.write('--------------------\n')
@@ -387,6 +337,7 @@ class CONTROL:
             self.break_found = True;
         # stuff that happens after instr fetch goes here
         self.issue.send_next(self)
+        self.alu.execInstr(self, self)
         self.print_state()
         if self.miss:
             self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
@@ -859,29 +810,28 @@ class PREALU:
 
 class ALU:
     def execInstr(self, control):
-
         instr = control.preALU.buffer[1]
-        control.preALU.removeFromBuffer()
-        if instr[0] == 5: # case: sll [5, rd, rt, shamt]
-            control.reg.r[instr[1]] = control.reg.r[instr[2]] << instr[3]
-        elif instr[0] == 6: # case: sub [6, rd, rt, rs]
-            control.reg.r[instr[1]] = control.reg.r[instr[3]] - control.reg.r[instr[2]]
-        elif instr[0] == 7: # case: add [7, rd, rt, rs]
-            control.reg.r[instr[1]] = control.reg.r[instr[3]] + control.reg.r[instr[2]]
-        elif instr[0] == 8: # case: srl [8, rd, rt, shamt]
-            control.reg.r[instr[1]] = control.reg.r[instr[2]] << instr[3]
-        elif instr[0] == 9: # case: and [9, rd, rt, rs]
-            control.reg.r[instr[1]] = control.reg.r[instr[3]] & control.reg.r[instr[2]]
-        elif instr[0] == 10: # case: or [10, rd, rt, rs]
-            control.reg.r[instr[1]] = control.reg.r[instr[3]] | control.reg.r[instr[2]]
-        elif instr[0] == 11: # case: movz [11, rd, rt, rs]
-            if control.reg.r[instr[2]] == 0:
-                control.reg.r[instr[1]] = control.reg.r[instr[3]]
-        elif instr[0] == 12: # case: mul [12, rd, rt, rs]
-            control.reg.r[instr[1]] = control.reg.r[instr[3]] * control.reg.r[instr[2]]
-        elif instr[0] == 13: # case: addi [13, rt, rs, imm]
-            control.reg.r[instr[1]] = control.reg.r[instr[2]] + control.reg.r[instr[3]]
-
+        if instr != 0:
+            control.preALU.removeFromBuffer()
+            if instr[0] == 5: # case: sll [5, rd, rt, shamt]
+                control.reg.r[instr[1]] = control.reg.r[instr[2]] << instr[3]
+            elif instr[0] == 6: # case: sub [6, rd, rt, rs]
+                control.reg.r[instr[1]] = control.reg.r[instr[3]] - control.reg.r[instr[2]]
+            elif instr[0] == 7: # case: add [7, rd, rt, rs]
+                control.reg.r[instr[1]] = control.reg.r[instr[3]] + control.reg.r[instr[2]]
+            elif instr[0] == 8: # case: srl [8, rd, rt, shamt]
+                control.reg.r[instr[1]] = control.reg.r[instr[2]] << instr[3]
+            elif instr[0] == 9: # case: and [9, rd, rt, rs]
+                control.reg.r[instr[1]] = control.reg.r[instr[3]] & control.reg.r[instr[2]]
+            elif instr[0] == 10: # case: or [10, rd, rt, rs]
+                control.reg.r[instr[1]] = control.reg.r[instr[3]] | control.reg.r[instr[2]]
+            elif instr[0] == 11: # case: movz [11, rd, rt, rs]
+                if control.reg.r[instr[2]] == 0:
+                    control.reg.r[instr[1]] = control.reg.r[instr[3]]
+            elif instr[0] == 12: # case: mul [12, rd, rt, rs]
+                control.reg.r[instr[1]] = control.reg.r[instr[3]] * control.reg.r[instr[2]]
+            elif instr[0] == 13: # case: addi [13, rt, rs, imm]
+                control.reg.r[instr[1]] = control.reg.r[instr[2]] + control.reg.r[instr[3]]
 
 class PREMEM:
     def __init__(self):
@@ -910,6 +860,7 @@ class PREMEM:
         if self.buffer[1] != 0:
             self.buffer.pop(1)
             self.buffer.insert(0,"0")
+
 
 # DRIVER
 
