@@ -71,13 +71,11 @@ import getopt
 """
 # DISASSEMBLER METHODS
 
-
 def to_int_2c(bin):
     conversion = int(bin, 2)
     if bin[0] == '1':
         conversion -= 2 ** len(bin)
     return conversion
-
 
 def inst_to_str(x):
 
@@ -188,7 +186,6 @@ def inst_to_str(x):
         J()
     else:
         I()
-
 
 def dis(output_file, my_list):
     mem_address = 96
@@ -335,7 +332,6 @@ def dis(output_file, my_list):
 
 # CLASS DEFINITIONS FOR PIPELINE
 
-
 class REG:
     def __init__(self):
         self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -354,7 +350,6 @@ class REG:
         for x in range(24, 32):
             output.write('\t' + str(self.r[x]))
         output.write('\n')
-
 
 class CONTROL:
     def __init__(self, iput, oput):
@@ -503,8 +498,6 @@ class CACHE:
             self.memory[(mem_to_write_to - self.num_instructions)] = word1
             self.memory[(mem_to_write_to - self.num_instructions) + 1] = word2
 
-
-
 class IF:
     def __init__(self):
         self.hitCheck = 0       # in case of cache miss, returns -1 to controller so that it doesnt increment pc
@@ -539,17 +532,19 @@ class IF:
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
         # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
         instr_check = self.instr_check(self.hitCheck)
-        if instr_check[0] == -1: # case: BREAK found
+        if instr_check[0] == -1: # case: BREAK found [0,0,0,0]
             return 0
-        elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction
+        elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [-1,0,0,0]
             self.hitCheck = -1
-        elif instr_check[0] == 1:   # case: jr instr
+        elif instr_check[0] == 1:   # case: jr instr [1,rs,0,0]
             print()
-        elif instr_check[0] == 2:   # case: jump
+        elif instr_check[0] == 2:   # case: jump [2,jump_address]
             print()
         elif instr_check[0] == 3:  # case: bltz
             print()
         elif instr_check[0] == 4:  # case: beq
+            print()
+        elif instr_check[0] == 5:  # case: sll [5, rd, rt, shamt]
             print()
 
         if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
@@ -575,12 +570,22 @@ class IF:
                 if self.hitCheck == '10000000000000000000000000000000':
                     return_field[0] = 0
                     return return_field
+                else:
+                    Rd = int(self.hitCheck[16:21], 2)
+                    Rt = int(self[11:16], 2)
+                    Shamt = int(self[21:26], 2)
+                    return_field[0] = 5
+                    return_field[1] = Rd
+                    return_field[2] = Rt
+                    return_field[3] = Shamt
+                    return return_field
             elif instruction_hex == 8:
                 # jr Rs
                 Rs = int(self.hitCheck[6:11], 2)
                 return_field[0] = 1
                 return_field[1] = Rs
                 return return_field
+
         elif opcode_parse == 2:
             jump_address = int(self.hitCheck[6:], 2) * 4
             return_field[0] = 2
