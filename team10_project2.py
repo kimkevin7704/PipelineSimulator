@@ -286,6 +286,7 @@ def dis(output_file, my_list):
 class REG:
     def __init__(self):
         self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.holds = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     def print_regs(self, output):
         output.write('Registers\nR00:')
@@ -311,6 +312,7 @@ class CONTROL:
         self.cycle = 1
         self.output = oput
         self.still_running = True
+        self.waiting_for_stores_to_finish = 0
 
         #MACHINE COMPONENTS
         #things we need: pre-issue buffer
@@ -338,13 +340,15 @@ class CONTROL:
     def next_cycle(self):
         mem_miss = False
         fetch_miss = False
-        # stuff that happens before instr fetch goes here
+
         self.wb.grab_and_write()
         mem_code = self.mem.instr_grab(self.reg, self.postmem)
         if mem_code > 0:  # function above returns the target address if there's a cache miss from MEM unit
             mem_miss = True
             self.stalled = True
         else:             # with this algorithm, a LW will only stall for one fetch, so not sure if this is correct
+            if mem_code == -2:
+                self.waiting_for_stores_to_finish -= 1
             self.stalled = False
             mem_miss = False
         self.alu.execInstr(self.preALU, self.postalu, self.reg)
@@ -428,6 +432,8 @@ class CACHE:
         self.sets[request_set][self.assocblock][2] = 1
         self.sets[request_set][self.assocblock][target_entry] = str(value)  # else we want second word in block
 
+    """
+    THIS ENTIRE FUNCTION IS UNNECESSARY. LW IS HANDLED IN MEM WHEN IT PINGS CACHE FOR A VALUE...
     def lw(self, target):
         request_tag = target >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
         request_set = target & self.set_mask
@@ -435,7 +441,7 @@ class CACHE:
         target_entry = 4
         if target % 8 == 0:
             target_entry = 4  # if address is %8 then we want the first word in block
-        return int(self.sets[request_set][self.assocblock][target_entry])  # else we want second word in block
+        return int(self.sets[request_set][self.assocblock][target_entry])  # else we want second word in block"""
 
     def split_mem(self, mem):  # populates our lists at initialization
         is_not_break = True
@@ -465,7 +471,7 @@ class CACHE:
             block_to_grab = self.memory[block_to_grab2 - self.num_instructions]
             block_to_grab2 = self.memory[block_to_grab2 - self.num_instructions + 1]
 
-        if self.sets[block_set][self.LRU[block_set]][0] == 1:
+        if self.sets[block_set][self.LRU[block_set]][1] == 1:
             self.write_back(block_set, block_tag, self.sets[block_set][self.LRU[block_set]][3], self.sets[block_set][self.LRU[block_set]][4])
         self.sets[block_set][self.LRU[block_set]][0] = 1
         self.sets[block_set][self.LRU[block_set]][2] = block_tag
@@ -626,8 +632,8 @@ class IF:
                     return return_field
                 else:
                     Rd = int(self.hitCheck[16:21], 2)
-                    Rt = int(self[11:16], 2)
-                    Shamt = int(self[21:26], 2)
+                    Rt = int(self.hitCheck[11:16], 2)
+                    Shamt = int(self.hitCheck[21:26], 2)
                     return_field[0] = 5
                     return_field[1] = Rd
                     return_field[2] = Rt
@@ -770,27 +776,16 @@ class IF:
 
 class PREISSUEBUFFER:
     def __init__(self):
-        self.buffer = [0, 0, 0, 0]
+        self.buffer = []
 
-    # add instruction to PIB [0,0,0,0] --> [0,0,0,I1]
     def addToBuffer(self, instruction):
-        self.buffer.pop(0)
         self.buffer.append(instruction)
 
-    # remove instruction from PIB [0,0,I2,I1] --> [0,0,0,I2]
-    def removeFromBuffer(self):
-        # if first in line of PIB is occupied, POP and add 0 at end of line
-        if self.buffer[3] != 0:
-            self.buffer.pop(3)
-            self.buffer.insert(0, "0")
+    def removeFromBuffer(self, x):
+            self.buffer.pop(x)
 
-    # check if preissue buffer is full, has 1 slot, or more than 1 available
-    # RETURNS NUMBER OF SLOTS TO FILL FOR IF
     def isFull(self):
-        slotsAvailable = 0
-        for slot in self.buffer:
-            if slot == 0:
-                slotsAvailable += 1
+        slotsAvailable = 4 - len(self.buffer)
         if slotsAvailable == 0:
             return 0
         if slotsAvailable == 1:
@@ -809,55 +804,53 @@ class PREISSUEBUFFER:
 class ISSUE():
     # STILL NEEDS HAZARD CHECKS (SHOULD DO AFTER FINISHING PIPELINE)
     # IF INSTRUCTION IS LW OR SW, SEND TO PREMEM QUEUE. ALL OTHERS GO TO PREALU
-    def send_next(self, controller):  # no idea what I was going for here
-        maxSendPerCC = 0        # once counter hits 2, stop sending
-        for x in range(0, 3):
-            if maxSendPerCC <= 2:
-                if not controller.pib.buffer[3-x] == 0:
-                    instructionToSend = controller.pib.buffer[3 - x]
-                    if instructionToSend[0] == 14 or instructionToSend[0] == 15:
-                        controller.preMEM.addToBuffer(instructionToSend)
-                        controller.pib.removeFromBuffer()
-                        maxSendPerCC += 1
+    def send_next(self, controller):
+        sent_to_mem = False
+        sent_to_alu = False
+        items_to_remove = []
+        item_number = 0
+        for x in controller.pib.buffer:
+            if sent_to_alu and sent_to_mem:
+                break
+            instructionToSend = x
+            if (not sent_to_mem) and (instructionToSend[0] == 14 or instructionToSend[0] == 15):
+                if (instructionToSend[0] == 14) or (not controller.waiting_for_stores_to_finish > 0):
+                    items_to_remove.append(item_number)
+                    controller.preMEM.addToBuffer(instructionToSend)
+                    sent_to_mem = True
+                    if instructionToSend[0] == 15:
+                        controller.reg.holds[instructionToSend[1]] = 1
                     else:
-                        controller.preALU.addToBuffer(instructionToSend)
-                        controller.pib.removeFromBuffer()
-                        maxSendPerCC += 1
+                        controller.waiting_for_stores_to_finish += 1
+            elif (not sent_to_alu) and not (instructionToSend[0] == 14 or instructionToSend[0] == 15) and (controller.reg.holds[instructionToSend[1]] == 0):
+                controller.preALU.addToBuffer(instructionToSend)
+                items_to_remove.append(item_number)
+                sent_to_alu = True
+            item_number += 1
+        items_to_remove.reverse()
+        for x in items_to_remove:
+            w = 1
+            controller.pib.removeFromBuffer(x)
 
 
 class PREALU:
     def __init__(self):
-        self.buffer = [0, 0]
+        self.buffer = []
 
     def isFull(self):
-        slotsAvailable = 0
-        for slot in self.buffer:
-            if slot == 0:
-                slotsAvailable += 1
-        if slotsAvailable == 0:
-            return 0
-        if slotsAvailable == 1:
-            return 1
-        else:
-            return 2
+        return 2 - len(self.buffer)
 
-    # add instruction [0,0] --> [0,I1]
     def addToBuffer(self, instruction):
-        self.buffer.pop(0)
         self.buffer.append(instruction)
 
-    # remove instruction[I2,I1] --> [0,I2]
     def removeFromBuffer(self):
-        # if first in line of PIB is occupied, POP and add 0 at end of line
-        if self.buffer[1] != 0:
-            self.buffer.pop(1)
-            self.buffer.insert(0,"0")
+            self.buffer.pop(0)
 
 
 class ALU:
     def execInstr(self, preALU, postalu, reg):
-        instr = preALU.buffer[1]
-        if instr != '0' and instr != 0:
+        if preALU.buffer != []:
+            instr = preALU.buffer[0]
             preALU.removeFromBuffer()
             if instr[0] == 5:  # case: sll [5, rd, rt, shamt]
                 instr.append(reg.r[instr[2]] << instr[3])
@@ -900,32 +893,20 @@ class POSTALU(object):
 
 class PREMEM:
     def __init__(self):
-        self.buffer = [0,0]
+        self.buffer = []
 
     def isFull(self):
-        slotsAvailable = 0
-        for slot in self.buffer:
-            if slot == 0:
-                slotsAvailable += 1
-        if slotsAvailable == 0:
-            return 0
-        if slotsAvailable == 1:
-            return 1
-        else:
-            return 2
+        return 2 - len(self.buffer)
 
     # add instruction [0,0] --> [0,I1]
     def addToBuffer(self, instruction):
-        self.buffer.pop(0)
         self.buffer.append(instruction)
 
     # remove instruction[I2,I1] --> [0,I2]
     def removeFromBuffer(self):
         # if first in line is occupied, POP and add 0 at end of line
-        if self.buffer[1] != 0:
-            temp = self.buffer.pop(1)
-            self.buffer.insert(0,"0")
-            return temp
+        if self.buffer != []:
+            return self.buffer.pop(0)
         else:
             return 0
 """    def ping(self):
@@ -943,16 +924,17 @@ class MEM(object):
         self.cache = cache
 
     def instr_grab(self, reg, postmem):
-        pm_check = self.premem.removeFromBuffer()
-        if not pm_check == 0:
+        if self.premem.buffer != []:
+            pm_check = self.premem.buffer[0]
             target = reg.r[pm_check[2]] + pm_check[3] # calculates target address from contents of register[rs] + offset
             cache_check = self.cache.ping(target)
             if cache_check > 0:  # case cache hit
                 self.premem.removeFromBuffer()
                 if pm_check[0] == 14:   # case SW
                     self.cache.sw(target, pm_check[1])
+                    return -2 # case SW successful, remove hold on LW
                 else:                   # case LW
-                    pm_check.append(self.cache.lw(target))
+                    pm_check.append(to_int_2c(cache_check))
                     postmem.get_instr(pm_check)
                 return -1
             else: # case cache miss
@@ -966,15 +948,13 @@ class POSTMEM(object):
         self.queue = []
 
     def get_instr(self, instr):
-        self.queue = instr
+        self.queue.append(instr)
 
     def return_instr(self):
         if self.queue == []:
             return [-1]
         else:
-            temp = self.queue
-            self.queue = []
-            return temp
+            return self.queue.pop(0)
 
 
 
@@ -989,6 +969,8 @@ class WB(object):
         alu_instr = self.postalu.return_instr()
         if not mem_instr[0] < 0:
             self.reg.r[mem_instr[1]] = mem_instr[5]
+            if mem_instr[0] == 15:
+                self.reg.holds[mem_instr[1]] = 0
         if not alu_instr == '0' and not alu_instr[0] < 0:
             self.reg.r[alu_instr[1]] = alu_instr[5]
 
