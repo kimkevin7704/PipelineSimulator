@@ -20,11 +20,13 @@ import getopt
 """
 # DISASSEMBLER METHODS
 
+
 def to_int_2c(bin):
     conversion = int(bin, 2)
     if bin[0] == '1':
         conversion -= 2 ** len(bin)
     return conversion
+
 
 def inst_to_str(x):
 
@@ -130,11 +132,12 @@ def inst_to_str(x):
     opcode_parse = int(opcode, 2)
 
     if opcode_parse == 0:
-        R()
+        return R()
     elif opcode_parse == 2:
-        J()
+        return J()
     else:
-        I()
+        return I()
+
 
 def dis(output_file, my_list):
     mem_address = 96
@@ -280,7 +283,6 @@ def dis(output_file, my_list):
 
 
 # CLASS DEFINITIONS FOR PIPELINE
-
 class REG:
     def __init__(self):
         self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -300,6 +302,7 @@ class REG:
             output.write('\t' + str(self.r[x]))
         output.write('\n')
 
+
 class CONTROL:
     def __init__(self, iput, oput):
         self.stalled = False
@@ -307,16 +310,17 @@ class CONTROL:
         self.pc = 96
         self.cycle = 1
         self.output = oput
+        self.still_running = True
 
         #MACHINE COMPONENTS
         #things we need: pre-issue buffer
+        self.reg = REG()
         self.cache = CACHE(iput)
-        self.ifetch = IF()
+        self.ifetch = IF(self.reg)
         self.pib = PREISSUEBUFFER()
         self.issue = ISSUE()
         self.preALU = PREALU()
         self.preMEM = PREMEM()
-        self.reg = REG()
         self.alu = ALU()
         self.postalu = POSTALU(self.alu)
         self.mem = MEM(self.preMEM, self.cache)
@@ -342,27 +346,23 @@ class CONTROL:
             self.stalled = True
         else:             # with this algorithm, a LW will only stall for one fetch, so not sure if this is correct
             self.stalled = False
+            mem_miss = False
         self.alu.execInstr(self.preALU, self.postalu, self.reg)
         self.issue.send_next(self)
-
-
         if not self.stalled:
             fetch_code = self.ifetch.fetch(self.cache, self.pc, self.pib)
             if fetch_code == -1:
                 fetch_miss = True
             elif fetch_code == 0:
                 self.break_found = True
-        # stuff that happens after instr fetch goes here
-        """THIS IS NOT CORRECT, WE'RE SUPPOSED TO BE CALLING SHIT IN REVERSE ORDER OF THE PIPELINE"""
-
-
+            else:
+                self.pc += 8  # if no cache miss, increment PC
         self.print_state()
         if mem_miss:
             self.cache.grab_mem(mem_code)
         if fetch_miss:
             self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
-        else:
-            self.pc += 4                    # if no cache miss, increment PC
+
 
 class CACHE:
     def __init__(self, iput):
@@ -402,22 +402,21 @@ class CACHE:
     def ping(self, pc):
         request_tag = pc >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
         request_set = pc & self.set_mask
-        request_set = request_tag >> 3
+        request_set = request_set >> 3
         if self.sets[request_set][0][2] == request_tag:       # check first block in matching set for hit
             self.assocblock = 0
             self.hit = True
         elif self.sets[request_set][1][2] == request_tag:     # check second block
             self.assocblock = 1
             self.hit = True
-        if self.hit:
-            if pc % 8 == 0:
-                return self.sets[request_set][self.assocblock][3]       # if address is %8 then we want the first word in block
-            else:
-                return self.sets[request_set][self.assocblock][4]       # else we want second word in block
         else:
             self.hit = False
-            # self.mem_to_grab = pc  # cache miss, update this var and it will be pulled at the very end of the cycle
             return -1
+        if pc % 8 == 0:
+            return self.sets[request_set][self.assocblock][3]       # if address is %8 then we want the first word in block
+        else:
+            return self.sets[request_set][self.assocblock][4]       # else we want second word in block
+
 
     def sw(self, target, value):
         request_tag = target >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
@@ -427,7 +426,7 @@ class CACHE:
         if target % 8 == 0:
             target_entry = 4  # if address is %8 then we want the first word in block
         self.sets[request_set][self.assocblock][2] = 1
-        self.sets[request_set][self.assocblock][target_entry] = int(value, 2)  # else we want second word in block
+        self.sets[request_set][self.assocblock][target_entry] = str(value)  # else we want second word in block
 
     def lw(self, target):
         request_tag = target >> 5  # maybe not correct, this whole block attempts to decode the fetch request address
@@ -444,12 +443,11 @@ class CACHE:
             if is_not_break:
                 x = line
                 self.instructions.append(x[0:32])
+                self.num_instructions += 1
                 if x == '10000000000000000000000000001101':
                     is_not_break = False
                 else:
-                    self.num_instructions += 1
                     self.break_line += 4  # finds the mem location for BREAK so we can determine which list to pull from
-
             else:
                 x = line
                 self.memory.append(x[0:32])
@@ -488,10 +486,12 @@ class CACHE:
             self.memory[(mem_to_write_to - self.num_instructions)] = word1
             self.memory[(mem_to_write_to - self.num_instructions) + 1] = word2
 
+
 class IF:
-    def __init__(self):
+    def __init__(self, reg):
         self.hitCheck = 0       # in case of cache miss, returns -1 to controller so that it doesnt increment pc
         self.isStall = False    # if fetch unit is stalled, no instruction fetch
+        self.reg = reg
 
     # returns number of instructions IF can fetch
     def canFetch(self, pib):
@@ -736,7 +736,7 @@ class IF:
                 return return_field
             elif opcode_parse == 8:
                 #addi Rt, Rs, imm
-                Imm = to_int_2c(self.hitCheck[16:], 2)
+                Imm = to_int_2c(self.hitCheck[16:])
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
                 return_field[0] = 13
@@ -766,6 +766,7 @@ class IF:
         return return_field
 
     # BRANCH, BREAK, NOP, AND INVALID INSTRUCTIONS ARE ALL FETCHED. IF WILL HANDLE THEM.
+
 
 class PREISSUEBUFFER:
     def __init__(self):
@@ -823,6 +824,7 @@ class ISSUE():
                         controller.pib.removeFromBuffer()
                         maxSendPerCC += 1
 
+
 class PREALU:
     def __init__(self):
         self.buffer = [0, 0]
@@ -851,10 +853,11 @@ class PREALU:
             self.buffer.pop(1)
             self.buffer.insert(0,"0")
 
+
 class ALU:
     def execInstr(self, preALU, postalu, reg):
         instr = preALU.buffer[1]
-        if instr != 0:
+        if instr != '0' and instr != 0:
             preALU.removeFromBuffer()
             if instr[0] == 5:  # case: sll [5, rd, rt, shamt]
                 instr.append(reg.r[instr[2]] << instr[3])
@@ -874,8 +877,9 @@ class ALU:
             elif instr[0] == 12:  # case: mul [12, rd, rt, rs]
                 instr.append(reg.r[instr[3]] * reg.r[instr[2]])
             elif instr[0] == 13:  # case: addi [13, rt, rs, imm]
-                instr.append(reg.r[instr[2]] + reg.r[instr[3]])
+                instr.append(reg.r[instr[2]] + instr[3])
             postalu.get_instr(instr)
+
 
 class POSTALU(object):
     def __init__(self, alu):
@@ -892,6 +896,7 @@ class POSTALU(object):
             temp = self.queue
             self.queue = []
             return temp
+
 
 class PREMEM:
     def __init__(self):
@@ -918,11 +923,13 @@ class PREMEM:
     def removeFromBuffer(self):
         # if first in line is occupied, POP and add 0 at end of line
         if self.buffer[1] != 0:
-            self.buffer.pop(1)
+            temp = self.buffer.pop(1)
             self.buffer.insert(0,"0")
-
-    def ping(self):
-        return self.buffer.index(0)
+            return temp
+        else:
+            return 0
+"""    def ping(self):
+        return self.buffer[0]"""
 
 
 class MEM(object):
@@ -936,9 +943,9 @@ class MEM(object):
         self.cache = cache
 
     def instr_grab(self, reg, postmem):
-        pm_check = self.premem.ping()
+        pm_check = self.premem.removeFromBuffer()
         if not pm_check == 0:
-            target = 96 #reg.r[pm_check[2]] # + to_int_2c(pm_check[3]) # calculates target address from contents of register[rs] + offset
+            target = reg.r[pm_check[2]] + pm_check[3] # calculates target address from contents of register[rs] + offset
             cache_check = self.cache.ping(target)
             if cache_check > 0:  # case cache hit
                 self.premem.removeFromBuffer()
@@ -946,11 +953,12 @@ class MEM(object):
                     self.cache.sw(target, pm_check[1])
                 else:                   # case LW
                     pm_check.append(self.cache.lw(target))
-                    postmem.get_instr()
+                    postmem.get_instr(pm_check)
                 return -1
             else: # case cache miss
                 return target
         return 0
+
 
 class POSTMEM(object):
     def __init__(self, mem):
@@ -969,6 +977,7 @@ class POSTMEM(object):
             return temp
 
 
+
 class WB(object):
     def __init__(self, reg, postmem, postalu):
         self.reg = reg
@@ -978,10 +987,10 @@ class WB(object):
     def grab_and_write(self):
         mem_instr = self.postmem.return_instr()
         alu_instr = self.postalu.return_instr()
-        if mem_instr[0] >= 0:
+        if not mem_instr[0] < 0:
             self.reg.r[mem_instr[1]] = mem_instr[5]
-        if alu_instr[0] >= 0:
-            self.reg.r[alu_instr[1]] = mem_instr[5]
+        if not alu_instr == '0' and not alu_instr[0] < 0:
+            self.reg.r[alu_instr[1]] = alu_instr[5]
 
 
 # DRIVER
@@ -1011,19 +1020,11 @@ dis(out_file_dis, my_list)
 controller = CONTROL(my_list, out_file_pipeline)
 
 
-#start Clock Cycle
-controller.next_cycle()
-controller.next_cycle()
-#WHILE INSTRUCTION IS NOT BREAK...
+# start Clock Cycle
+while controller.still_running:
+    controller.next_cycle()
+    do = "shit"
 
-#try to fetch instructions
-#check: 1. stall 2. PIB room 3. instruction type
-if controller.ifetch.isStall == False:
-    if controller.pib.isFull() > 0:
-        print()# if
-
-
-# class WB:
 
 
 
