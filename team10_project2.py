@@ -318,9 +318,10 @@ class CONTROL:
         self.preMEM = PREMEM()
         self.reg = REG()
         self.alu = ALU()
+        self.postalu = POSTALU(self.alu)
         self.mem = MEM(self.preMEM, self.cache)
         self.postmem = POSTMEM(self.mem)
-        self.wb = WB(self.reg, self.postmem)
+        self.wb = WB(self.reg, self.postmem, self.postalu)
 
     def print_state(self):  # function to output all states of current cycle
         self.output.write('--------------------\n')
@@ -334,12 +335,17 @@ class CONTROL:
         mem_miss = False
         fetch_miss = False
         # stuff that happens before instr fetch goes here
-        mem_code = self.mem.instr_grab(self.reg)
+        self.wb.grab_and_write()
+        mem_code = self.mem.instr_grab(self.reg, self.postmem)
         if mem_code > 0:  # function above returns the target address if there's a cache miss from MEM unit
             mem_miss = True
             self.stalled = True
         else:             # with this algorithm, a LW will only stall for one fetch, so not sure if this is correct
             self.stalled = False
+        self.alu.execInstr(self.preALU, self.postalu, self.reg)
+        self.issue.send_next(self)
+
+
         if not self.stalled:
             fetch_code = self.ifetch.fetch(self.cache, self.pc, self.pib)
             if fetch_code == -1:
@@ -348,8 +354,8 @@ class CONTROL:
                 self.break_found = True
         # stuff that happens after instr fetch goes here
         """THIS IS NOT CORRECT, WE'RE SUPPOSED TO BE CALLING SHIT IN REVERSE ORDER OF THE PIPELINE"""
-        self.issue.send_next(self)
-        self.alu.execInstr(self, self)
+
+
         self.print_state()
         if mem_miss:
             self.cache.grab_mem(mem_code)
@@ -515,7 +521,7 @@ class IF:
             return -1
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
         # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
-        instr_check = self.instr_check(self.hitCheck)
+        instr_check = self.instr_check()
         if instr_check[0] == -1: # case: BREAK found [-1,0,0,0]
             return 0
         elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [0,0,0,0]
@@ -559,7 +565,7 @@ class IF:
                 return -1
             # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
             # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
-            instr_check = self.instr_check(self.hitCheck)
+            instr_check = self.instr_check()
             if instr_check[0] == -1:  # case: BREAK found [-1,0,0,0]
                 return 0
             elif instr_check[0] == 0:  # case: nop or invalid instr - discard instruction [0,0,0,0]
@@ -598,7 +604,7 @@ class IF:
                 pib.addToBuffer(instr_check)
 
     def instr_check(self):
-        return_field = [0, 0, 0, 0]
+        return_field = [0, 0, 0, 0, 0]
         if self.hitCheck[0] == 0: #invalid instr check
             return_field[0] = 0
             return return_field
@@ -609,6 +615,8 @@ class IF:
         opcode_parse = int(opcode, 2)
         instruction = self.hitCheck[26:]
         instruction_hex = int(instruction, 2)
+
+        return_field[4] = inst_to_str(self.hitCheck)
 
         if opcode_parse == 0:
             if instruction_hex == 0:
@@ -698,7 +706,7 @@ class IF:
             return_field[1] = jump_address
             return return_field
         else:
-            if instruction_hex == 1:
+            if opcode_parse == 1:
                 # bltz Rs, label
                 Rs = int(self.hitCheck[6:11], 2)
                 label = to_int_2c(self.hitCheck[16:])
@@ -706,7 +714,7 @@ class IF:
                 return_field[1] = Rs
                 return_field[2] = label
                 return return_field
-            elif instruction_hex == 4:
+            elif opcode_parse == 4:
                 # beq Rs, Rt, label
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
@@ -716,7 +724,7 @@ class IF:
                 return_field[2] = Rt
                 return_field[3] = label
                 return return_field
-            elif instruction_hex == 28:
+            elif opcode_parse == 28:
                 #mul rd, rs, rt
                 Rd = int(self.hitCheck[16:21], 2)
                 Rt = int(self.hitCheck[11:16], 2)
@@ -726,7 +734,7 @@ class IF:
                 return_field[2] = Rt
                 return_field[3] = Rs
                 return return_field
-            elif instruction_hex == 8:
+            elif opcode_parse == 8:
                 #addi Rt, Rs, imm
                 Imm = to_int_2c(self.hitCheck[16:], 2)
                 Rt = int(self.hitCheck[11:16], 2)
@@ -736,7 +744,7 @@ class IF:
                 return_field[2] = Rs
                 return_field[3] = Imm
                 return return_field
-            elif instruction_hex == 11:
+            elif opcode_parse == 11:
                 # sw Rt, BOffset(Rs)
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
@@ -745,7 +753,7 @@ class IF:
                 return_field[1] = Rt
                 return_field[2] = Rs
                 return_field[3] = BOffset
-            elif instruction_hex == 3:
+            elif opcode_parse == 3:
                 # lw Rt, Boffset(Rs)
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
@@ -796,22 +804,24 @@ class PREISSUEBUFFER:
             if self.buffer[x] != 0:
                 outfile.write(':\t[' + inst_to_str(self.buffer[x]) + ']\n')
 
+
 class ISSUE():
-    #STILL NEEDS HAZARD CHECKS (SHOULD DO AFTER FINISHING PIPELINE)
-    #IF INSTRUCTION IS LW OR SW, SEND TO PREMEM QUEUE. ALL OTHERS GO TO PREALU
-    def send_next(self, controller): # no idea what I was going for here
+    # STILL NEEDS HAZARD CHECKS (SHOULD DO AFTER FINISHING PIPELINE)
+    # IF INSTRUCTION IS LW OR SW, SEND TO PREMEM QUEUE. ALL OTHERS GO TO PREALU
+    def send_next(self, controller):  # no idea what I was going for here
         maxSendPerCC = 0        # once counter hits 2, stop sending
-        for x in range(0, 3) and maxSendPerCC <= 2:
-            if controller.pib[3-x] != 0:
-                instructionToSend = controller.pib[3 - x]
-                if instructionToSend[0] == 14 or instructionToSend[0] == 15:
-                    controller.preMEM.addToBuffer(instructionToSend)
-                    controller.pib.removeFromBuffer()
-                    maxSendPerCC += 1
-                else:
-                    controller.preALU.addToBuffer(instructionToSend)
-                    controller.pib.removeFromBuffer()
-                    maxSendPerCC += 1
+        for x in range(0, 3):
+            if maxSendPerCC <= 2:
+                if not controller.pib.buffer[3-x] == 0:
+                    instructionToSend = controller.pib.buffer[3 - x]
+                    if instructionToSend[0] == 14 or instructionToSend[0] == 15:
+                        controller.preMEM.addToBuffer(instructionToSend)
+                        controller.pib.removeFromBuffer()
+                        maxSendPerCC += 1
+                    else:
+                        controller.preALU.addToBuffer(instructionToSend)
+                        controller.pib.removeFromBuffer()
+                        maxSendPerCC += 1
 
 class PREALU:
     def __init__(self):
@@ -842,29 +852,46 @@ class PREALU:
             self.buffer.insert(0,"0")
 
 class ALU:
-    def execInstr(self, control):
-        instr = control.preALU.buffer[1]
+    def execInstr(self, preALU, postalu, reg):
+        instr = preALU.buffer[1]
         if instr != 0:
-            control.preALU.removeFromBuffer()
+            preALU.removeFromBuffer()
             if instr[0] == 5:  # case: sll [5, rd, rt, shamt]
-                instr.append(control.reg.r[instr[2]] << instr[3])
+                instr.append(reg.r[instr[2]] << instr[3])
             elif instr[0] == 6:  # case: sub [6, rd, rt, rs]
-                instr.append(control.reg.r[instr[3]] - control.reg.r[instr[2]])
+                instr.append(reg.r[instr[3]] - reg.r[instr[2]])
             elif instr[0] == 7:  # case: add [7, rd, rt, rs]
-                instr.append(control.reg.r[instr[3]] + control.reg.r[instr[2]])
+                instr.append(reg.r[instr[3]] + reg.r[instr[2]])
             elif instr[0] == 8:  # case: srl [8, rd, rt, shamt]
-                instr.append(control.reg.r[instr[2]] << instr[3])
+                instr.append(reg.r[instr[2]] << instr[3])
             elif instr[0] == 9:  # case: and [9, rd, rt, rs]
-                instr.append(control.reg.r[instr[3]] & control.reg.r[instr[2]])
+                instr.append(reg.r[instr[3]] & reg.r[instr[2]])
             elif instr[0] == 10:  # case: or [10, rd, rt, rs]
-                instr.append(control.reg.r[instr[3]] | control.reg.r[instr[2]])
+                instr.append(reg.r[instr[3]] | reg.r[instr[2]])
             elif instr[0] == 11:  # case: movz [11, rd, rt, rs]
-                if control.reg.r[instr[2]] == 0:
-                    instr.append(control.reg.r[instr[3]])
+                if reg.r[instr[2]] == 0:
+                    instr.append(reg.r[instr[3]])
             elif instr[0] == 12:  # case: mul [12, rd, rt, rs]
-                instr.append(control.reg.r[instr[3]] * control.reg.r[instr[2]])
+                instr.append(reg.r[instr[3]] * reg.r[instr[2]])
             elif instr[0] == 13:  # case: addi [13, rt, rs, imm]
-                instr.append(control.reg.r[instr[2]] + control.reg.r[instr[3]])
+                instr.append(reg.r[instr[2]] + reg.r[instr[3]])
+            postalu.get_instr(instr)
+
+class POSTALU(object):
+    def __init__(self, alu):
+        self.alu = alu
+        self.queue = []
+
+    def get_instr(self, instr):
+        self.queue = instr
+
+    def return_instr(self):
+        if self.queue == []:
+            return [-1]
+        else:
+            temp = self.queue
+            self.queue = []
+            return temp
 
 class PREMEM:
     def __init__(self):
@@ -910,18 +937,20 @@ class MEM(object):
 
     def instr_grab(self, reg, postmem):
         pm_check = self.premem.ping()
-        target = reg.r[pm_check[2]] + to_int_2c(pm_check[3]) # calculates target address from contents of register[rs] + offset
-        cache_check = self.cache.ping(target)
-        if cache_check > 0: # case cache hit
-            self.premem.removeFromBuffer()
-            if pm_check[0] == 14:   # case SW
-                self.cache.sw(target, pm_check[1])
-            else:                   # case LW
-                pm_check.append(self.cache.lw(target))
-                postmem.get_instr()
-            return -1
-        else: # case cache miss
-            return target
+        if not pm_check == 0:
+            target = 96 #reg.r[pm_check[2]] # + to_int_2c(pm_check[3]) # calculates target address from contents of register[rs] + offset
+            cache_check = self.cache.ping(target)
+            if cache_check > 0:  # case cache hit
+                self.premem.removeFromBuffer()
+                if pm_check[0] == 14:   # case SW
+                    self.cache.sw(target, pm_check[1])
+                else:                   # case LW
+                    pm_check.append(self.cache.lw(target))
+                    postmem.get_instr()
+                return -1
+            else: # case cache miss
+                return target
+        return 0
 
 class POSTMEM(object):
     def __init__(self, mem):
@@ -941,14 +970,18 @@ class POSTMEM(object):
 
 
 class WB(object):
-    def __init__(self, reg, postmem):
+    def __init__(self, reg, postmem, postalu):
         self.reg = reg
         self.postmem = postmem
+        self.postalu = postalu
 
     def grab_and_write(self):
-        instr =  self.postmem.return_instr()
-        if instr[0] >= 0:
-            self.reg.r[instr[1]] = instr[4]
+        mem_instr = self.postmem.return_instr()
+        alu_instr = self.postalu.return_instr()
+        if mem_instr[0] >= 0:
+            self.reg.r[mem_instr[1]] = mem_instr[5]
+        if alu_instr[0] >= 0:
+            self.reg.r[alu_instr[1]] = mem_instr[5]
 
 
 # DRIVER
@@ -976,11 +1009,11 @@ dis(out_file_dis, my_list)
 
 #initialize pipeline
 controller = CONTROL(my_list, out_file_pipeline)
-controller.next_cycle()
-controller.next_cycle()
+
 
 #start Clock Cycle
-
+controller.next_cycle()
+controller.next_cycle()
 #WHILE INSTRUCTION IS NOT BREAK...
 
 #try to fetch instructions
