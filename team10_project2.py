@@ -3,13 +3,19 @@ import getopt
 
 """
 STILL NEED:
-    -WHY IS AN INSTRUCTION BEING PULLED FROM WRONG LIST..
-    -BRANCH LOGIC IN IF
-    -FIX LW
+print timing
 -"""
+
 
 # DISASSEMBLER METHODS
 def to_int_2c(bin):
+    if type(bin) == int or type(bin) == long:
+        if bin < 0:
+            return bin
+        else:
+            str(bin)
+    if int(bin) < 0:
+        return int(bin)
     conversion = int(bin, 2)
     if bin[0] == '1':
         conversion -= 2 ** len(bin)
@@ -79,30 +85,30 @@ def inst_to_str(x):
             # addi Rt, Rs, Imm
             Rt = str(int(x[11:16], 2))
             Rs = str(int(x[6:11], 2))
-            Imm = str(to_int_2c(x[16:]))
+            Imm = str(to_int_2c(x[16:32]))
             return 'ADDI' + '\t' + 'R' + Rt + ', R' + Rs + ', #' + Imm
         elif instruction_hex == 11:
             # sw Rt, BOffset(Rs)
             Rt = str(int(x[11:16], 2))
             Rs = str(int(x[6:11], 2))
-            BOffset = str(to_int_2c(x[16:]))
+            BOffset = str(to_int_2c(x[16:32]))
             return 'SW' + '\t' + 'R' + Rt + ', ' + BOffset + '(R' + Rs + ')'
         elif instruction_hex == 3:
             # lw Rt, Boffset(Rs)
             Rt = str(int(x[11:16], 2))
             Rs = str(int(x[6:11], 2))
-            BOffset = str(to_int_2c(x[16:]))
+            BOffset = str(to_int_2c(x[16:32]))
             return 'LW' + '\t' + 'R' + Rt + ', ' + BOffset + '(R' + Rs + ')'
         elif instruction_hex == 1:
             # bltz Rs, label
             Rs = str(int(x[6:11], 2))
-            label = str(to_int_2c(x[16:]))
+            label = str(to_int_2c(x[16:32]))
             return 'BLTZ' + '\t' + 'R' + Rs + ', #' + label
         elif instruction_hex == 4:
             # beq Rs, Rt, label
             Rt = str(int(x[11:16], 2))
             Rs = str(int(x[6:11], 2))
-            label = str(to_int_2c(x[16:]))
+            label = str(to_int_2c(x[16:32]))
             return 'BEQ' + '\t' + 'R' + Rs + ', R' + Rt + ', #' + label
         elif instruction_hex == 28:
             # mul Rd, Rs, Rt
@@ -220,30 +226,30 @@ def dis(output_file, my_list):
                             # addi Rt, Rs, Imm
                             Rt = str(int(x[11:16], 2))
                             Rs = str(int(x[6:11], 2))
-                            Imm = str(to_int_2c(x[16:]))
+                            Imm = str(to_int_2c(x[16:32]))
                             output_file.write (x[0] + ' ' + x[1:6] + ' ' + x[6:11] + ' ' + x[11:16] + ' ' + x[16:21] + ' ' + x[21:26] + ' ' + x[26:] + '\t' + mem_address_str + '\t' + 'ADDI' + '\t' + 'R' + Rt + ', R' + Rs + ', #' + Imm + '\n')
                         elif instruction_hex == 11:
                             # sw Rt, BOffset(Rs)
                             Rt = str(int(x[11:16], 2))
                             Rs = str(int(x[6:11], 2))
-                            BOffset = str(to_int_2c(x[16:]))
+                            BOffset = str(to_int_2c(x[16:32]))
                             output_file.write (x[0] + ' ' + x[1:6] + ' ' + x[6:11] + ' ' + x[11:16] + ' ' + x[16:21] + ' ' + x[21:26] + ' ' + x[26:] + '\t' + mem_address_str + '\t' + 'SW' + '\t' + 'R' + Rt + ', ' + BOffset + '(R' + Rs + ')' + '\n')
                         elif instruction_hex == 3:
                             # lw Rt, Boffset(Rs)
                             Rt = str(int(x[11:16], 2))
                             Rs = str(int(x[6:11], 2))
-                            BOffset = str(to_int_2c(x[16:]))
+                            BOffset = str(to_int_2c(x[16:32]))
                             output_file.write (x[0] + ' ' + x[1:6] + ' ' + x[6:11] + ' ' + x[11:16] + ' ' + x[16:21] + ' ' + x[21:26] + ' ' + x[26:] + '\t' + mem_address_str + '\t' + 'LW' + '\t' + 'R' + Rt + ', ' + BOffset + '(R' + Rs + ')' + '\n')
                         elif instruction_hex == 1:
                             # bltz Rs, label
                             Rs = str(int(x[6:11], 2))
-                            label = str(to_int_2c(x[16:]))
+                            label = str(to_int_2c(x[16:32]))
                             output_file.write (x[0] + ' ' + x[1:6] + ' ' + x[6:11] + ' ' + x[11:16] + ' ' + x[16:21] + ' ' + x[21:26] + ' ' + x[26:] + '\t' + mem_address_str + '\t' + 'BLTZ' + '\t' + 'R' + Rs + ', #' + label + '\n')
                         elif instruction_hex == 4:
                             # beq Rs, Rt, label
                             Rt = str(int(x[11:16], 2))
                             Rs = str(int(x[6:11], 2))
-                            label = str(to_int_2c(x[16:]))
+                            label = str(to_int_2c(x[16:32]))
                             output_file.write (x[0] + ' ' + x[1:6] + ' ' + x[6:11] + ' ' + x[11:16] + ' ' + x[16:21] + ' ' + x[21:26] + ' ' + x[26:] + '\t' + mem_address_str + '\t' + 'BEQ' + '\t' + 'R' + Rs + ', R' + Rt + ', #' + label + '\n')
                         elif instruction_hex == 28:
                             # mul Rd, Rs, Rt
@@ -300,8 +306,10 @@ class CONTROL:
         self.cycle = 1
         self.output = oput
         self.still_running = True
-        self.waiting_for_stores_to_finish = 0
         self.pipeline_has_stuff = False
+        self.mem_miss = False
+        self.fetch_miss = False
+        self.mem_code = -1
 
         #MACHINE COMPONENTS
         self.reg = REG()
@@ -328,37 +336,33 @@ class CONTROL:
         self.reg.print_regs(self.output)
         self.cache.print_state(self.output)
 
-
     def next_cycle(self):
-        mem_miss = False
-        fetch_miss = False
+        if self.mem_miss:
+            self.cache.grab_mem(self.mem_code)
+        if self.fetch_miss:
+            self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
 
         self.wb.grab_and_write()
-        mem_code = self.mem.instr_grab(self.reg, self.postmem)
-        if mem_code > 0:  # function above returns the target address if there's a cache miss from MEM unit
-            mem_miss = True
-            #self.stalled = True
+        self.mem_code = self.mem.instr_grab(self.reg, self.postmem)
+        if self.mem_code > 0:  # function above returns the target address if there's a cache miss from MEM unit
+            self.mem_miss = True
         else:             # with this algorithm, a LW will only stall for one fetch, so not sure if this is correct
-            if mem_code == -2:
-                self.waiting_for_stores_to_finish -= 1
             self.stalled = False
-            mem_miss = False
+            self.mem_miss = False
         self.alu.execInstr(self.preALU, self.postalu, self.reg)
         self.issue.send_next(self)
         if not self.stalled and not self.break_found:
             fetch_code = self.ifetch.fetch(self.reg, self.cache, self.pc, self.pib)
             if fetch_code == -1:
-                fetch_miss = True
+                self.fetch_miss = True
             elif fetch_code == 0:
                 self.break_found = True
             elif fetch_code > 0:
                 self.pc = fetch_code
+                self.fetch_miss = False
             else:
                 self.pc += 8  # if no cache miss, increment PC
-        if mem_miss:
-            self.cache.grab_mem(mem_code)
-        if fetch_miss:
-            self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
+                self.fetch_miss = False
         self.pipeline_has_stuff = self.check_pipeline_for_stuff()
         if not self.pipeline_has_stuff and self.break_found:
             self.cache.wb_all()
@@ -433,8 +437,10 @@ class CACHE:
         request_set = target & self.set_mask
         request_set = request_tag >> 3
         target_entry = 4
+        self.LRU[request_set] = 0
         if target % 8 == 0:
             target_entry = 3  # if address is %8 then we want the first word in block
+            self.LRU[request_set] = 1
         self.sets[request_set][self.assocblock][1] = 1
         self.sets[request_set][self.assocblock][target_entry] = value  # else we want second word in block
 
@@ -456,7 +462,7 @@ class CACHE:
                 x = line
                 self.instructions.append(x[0:32])
                 self.num_instructions += 1
-                if x == '10000000000000000000000000001101':
+                if x[0:32] == '10000000000000000000000000001101':
                     is_not_break = False
                 else:
                     self.break_line += 4  # finds the mem location for BREAK so we can determine which list to pull from
@@ -464,23 +470,34 @@ class CACHE:
                 x = line
                 self.memory.append(x[0:32])
 
-    def grab_mem(self, pc):  # pull the requested address from instructions or memory based on break_line value
+    def grab_mem(self, Pc):  # pull the requested address from instructions or memory based on break_line value
+        if Pc % 8 == 0:
+            pc = Pc
+        else:
+            pc = Pc - 4
         block_to_grab = 0
         block_to_grab2 = (pc - 96)/4
         block_tag = pc >> 5
         block_set = pc & self.set_mask
         block_set = block_set >> 3
+        if self.sets[block_set][0][2] == block_tag:       # check first block in matching set for hit
+            return
+        elif self.sets[block_set][1][2] == block_tag:     # check second block
+            return
         if pc < self.break_line:
             block_to_grab = self.instructions[int(block_to_grab2)]
-            block_to_grab2 = self.instructions[int(block_to_grab2) + 1]
+            if block_to_grab != len(self.instructions) - 1:
+                block_to_grab2 = self.instructions[int(block_to_grab2) + 1]
+            else:
+                block_to_grab2 = self.memory[0]
         else:
             block_to_grab = self.memory[block_to_grab2 - self.num_instructions]
             block_to_grab2 = self.memory[block_to_grab2 - self.num_instructions + 1]
-            block_to_grab = int(block_to_grab)
-            block_to_grab2 = int(block_to_grab2)
+            block_to_grab = to_int_2c(block_to_grab)
+            block_to_grab2 = to_int_2c(block_to_grab2)
 
         if self.sets[block_set][self.LRU[block_set]][1] == 1:  # detect if writeback necessary
-            self.write_back(block_set, block_tag, self.sets[block_set][self.LRU[block_set]][3], self.sets[block_set][self.LRU[block_set]][4])
+            self.write_back(block_set, self.sets[block_set][self.LRU[block_set]][2], self.sets[block_set][self.LRU[block_set]][3], self.sets[block_set][self.LRU[block_set]][4])
         self.sets[block_set][self.LRU[block_set]][0] = 1
         self.sets[block_set][self.LRU[block_set]][2] = block_tag
         self.sets[block_set][self.LRU[block_set]][3] = block_to_grab
@@ -613,9 +630,9 @@ class IF:
         elif instr_check[0] == 15:  # case: lw [15, rt, rs, BOffset]
             pib.addToBuffer(instr_check)
 
-        if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
+        if pib.isFull() > 0 and self.hitCheck != 'miss':  # if hit and we have space, get next word also
             self.hitCheck = cache.ping(pc + 4)
-            if self.hitCheck < 0:
+            if self.hitCheck == 'miss':
                 return pc + 4
             instr_check = self.instr_check()
             if instr_check[0] == -1:  # case: BREAK found [-1,0,0,0]
@@ -770,7 +787,7 @@ class IF:
             if opcode_parse == 1:
                 # bltz Rs, label
                 Rs = int(self.hitCheck[6:11], 2)
-                label = to_int_2c(self.hitCheck[16:])
+                label = to_int_2c(self.hitCheck[16:32])
                 return_field[0] = 3
                 return_field[1] = Rs
                 return_field[2] = label
@@ -779,7 +796,7 @@ class IF:
                 # beq Rs, Rt, label
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
-                label = to_int_2c(self.hitCheck[16:])
+                label = to_int_2c(self.hitCheck[16:32])
                 return_field[0] = 4
                 return_field[1] = Rs
                 return_field[2] = Rt
@@ -797,7 +814,7 @@ class IF:
                 return return_field
             elif opcode_parse == 8:
                 #addi Rt, Rs, imm
-                Imm = to_int_2c(self.hitCheck[16:])
+                Imm = to_int_2c(self.hitCheck[16:32])
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
                 return_field[0] = 13
@@ -809,7 +826,7 @@ class IF:
                 # sw Rt, BOffset(Rs)
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
-                BOffset = to_int_2c(self.hitCheck[16:])
+                BOffset = to_int_2c(self.hitCheck[16:32])
                 return_field[0] = 14
                 return_field[1] = Rt
                 return_field[2] = Rs
@@ -818,7 +835,7 @@ class IF:
                 # lw Rt, Boffset(Rs)
                 Rt = int(self.hitCheck[11:16], 2)
                 Rs = int(self.hitCheck[6:11], 2)
-                BOffset = to_int_2c(self.hitCheck[16:])
+                BOffset = to_int_2c(self.hitCheck[16:32])
                 return_field[0] = 15
                 return_field[1] = Rt
                 return_field[2] = Rs
@@ -875,18 +892,15 @@ class ISSUE():
                 break
             instructionToSend = x
             if instructionToSend[0] == 14 or instructionToSend[0] == 15: # case SW or LW - sending to preMEM
-                if ((instructionToSend[0] == 14 and not sw_passed_up)or (not controller.waiting_for_stores_to_finish > 0)) and controller.reg.holds[instructionToSend[1]] == 0:
+                if (instructionToSend[0] == 14 or controller.reg.holds[instructionToSend[1]] == 0) and controller.preMEM.isFull() > 0 and not sw_passed_up:
                     items_to_remove.append(item_number)
                     controller.preMEM.addToBuffer(instructionToSend)
                     sent += 1
                     if instructionToSend[0] == 15:
                         controller.reg.holds[instructionToSend[1]] = 1
-                    else:
-                        # controller.reg.holds[instructionToSend[1]] = 1
-                        controller.waiting_for_stores_to_finish += 1
                 elif instructionToSend[0] == 14:
                     sw_passed_up = True
-            elif not (instructionToSend[0] == 14 or instructionToSend[0] == 15) and (controller.reg.holds[instructionToSend[1]] == 0):  # case anything else
+            elif not (instructionToSend[0] == 14 or instructionToSend[0] == 15) and (controller.reg.holds[instructionToSend[1]] == 0) and controller.preALU.isFull() > 0:  # case anything else
                 if instructionToSend[0] == 5:  # case: sll [5, rd, rt, shamt]
                     if controller.reg.holds[instructionToSend[2]] == 0:
                         controller.reg.holds[instructionToSend[1]] = 1
