@@ -1,12 +1,6 @@
 import sys
 import getopt
 
-"""
-STILL NEED:
-print timing
--"""
-
-
 # DISASSEMBLER METHODS
 def to_int_2c(bin):
     if type(bin) == int or type(bin) == long:
@@ -281,6 +275,7 @@ class REG:
     def __init__(self):
         self.r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         self.holds = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.soft_holds = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     def print_regs(self, output):
         output.write('\n\nRegisters\nR00:')
@@ -303,7 +298,7 @@ class CONTROL:
         self.stalled = False
         self.break_found = False
         self.pc = 96
-        self.cycle = 1
+        self.cycle = 0
         self.output = oput
         self.still_running = True
         self.pipeline_has_stuff = False
@@ -337,6 +332,10 @@ class CONTROL:
         self.cache.print_state(self.output)
 
     def next_cycle(self):
+        self.cycle += 1
+        if not self.pipeline_has_stuff and self.break_found:
+            self.still_running = False
+            return
         if self.mem_miss:
             self.cache.grab_mem(self.mem_code)
         if self.fetch_miss:
@@ -364,11 +363,7 @@ class CONTROL:
                 self.pc += 8  # if no cache miss, increment PC
                 self.fetch_miss = False
         self.pipeline_has_stuff = self.check_pipeline_for_stuff()
-        if not self.pipeline_has_stuff and self.break_found:
-            # self.cache.wb_all()
-            self.still_running = False
         self.print_state()
-        self.cycle += 1
 
 
     def check_pipeline_for_stuff(self):
@@ -895,7 +890,7 @@ class ISSUE():
                 break
             instructionToSend = x
             if instructionToSend[0] == 14 or instructionToSend[0] == 15: # case SW or LW - sending to preMEM
-                if (instructionToSend[0] == 14 or controller.reg.holds[instructionToSend[1]] == 0) and controller.preMEM.isFull() > 0 and not sw_passed_up:
+                if (instructionToSend[0] == 14 or instructionToSend[0] == 15) and controller.reg.soft_holds[instructionToSend[1]] == 0 and controller.reg.holds[instructionToSend[1]] == 0 and controller.reg.soft_holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[2]] == 0 and controller.preMEM.isFull() > 0 and not sw_passed_up:
                     items_to_remove.append(item_number)
                     controller.preMEM.addToBuffer(instructionToSend)
                     sent += 1
@@ -958,10 +953,15 @@ class ISSUE():
                         controller.preALU.addToBuffer(instructionToSend)
                         items_to_remove.append(item_number)
                         sent += 1
+            elif not (instructionToSend[0] == 14 or instructionToSend[0] == 15):
+                    controller.reg.soft_holds[instructionToSend[1]] = 1  # places a soft hold on register to prevent issue hazards
+
             item_number += 1
         items_to_remove.reverse()
         for x in items_to_remove:
             controller.pib.removeFromBuffer(x)
+        for x in controller.reg.soft_holds:  # removes soft holds at end of cycle
+            controller.reg.soft_holds[x] = 0
 
 
 class PREALU:
@@ -988,7 +988,6 @@ class PREALU:
             output.write('\n\tEntry ' + str(x) + ':')
             if len(self.buffer) >= x + 1:
                 output.write('\t[' + self.buffer[x][4] + ']')
-
 
 
 class ALU:
@@ -1134,7 +1133,6 @@ class POSTMEM(object):
             output.write('\t[' + self.queue[x][4] + ']')
 
 
-
 class WB(object):
     def __init__(self, reg, postmem, postalu):
         self.reg = reg
@@ -1221,7 +1219,6 @@ controller = CONTROL(my_list, out_file_pipeline)
 # start Clock Cycle
 while controller.still_running:
     controller.next_cycle()
-    do = "shit"
 controller.cache.wb_all()
 controller.print_state()
 
