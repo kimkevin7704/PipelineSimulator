@@ -313,6 +313,7 @@ class CONTROL:
         self.output = oput
         self.still_running = True
         self.waiting_for_stores_to_finish = 0
+        self.pipeline_has_stuff = False
 
         #MACHINE COMPONENTS
         #things we need: pre-issue buffer
@@ -366,6 +367,15 @@ class CONTROL:
             self.cache.grab_mem(mem_code)
         if fetch_miss:
             self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
+        self.pipeline_has_stuff = self.check_pipeline_for_stuff()
+        if not self.pipeline_has_stuff and self.break_found:
+            self.still_running = False
+
+        def check_pipeline_for_stuff(self):
+            if self.pib.is_clear() and self.preALU.is_clear() and self.preMem.is_clear() and self.postmem.is_clear() and self.postalu.is_clear():
+                self.pipeline_has_stuff = False
+            else:
+                self.pipeline_has_stuff = True
 
 
 class CACHE:
@@ -800,6 +810,12 @@ class PREISSUEBUFFER:
             if self.buffer[x] != 0:
                 outfile.write(':\t[' + inst_to_str(self.buffer[x]) + ']\n')
 
+    def is_clear(self):
+        if len(self.buffer) > 0:
+            return False
+        else:
+            return True
+
 
 class ISSUE():
     # STILL NEEDS HAZARD CHECKS (SHOULD DO AFTER FINISHING PIPELINE)
@@ -829,7 +845,6 @@ class ISSUE():
             item_number += 1
         items_to_remove.reverse()
         for x in items_to_remove:
-            w = 1
             controller.pib.removeFromBuffer(x)
 
 
@@ -846,6 +861,11 @@ class PREALU:
     def removeFromBuffer(self):
             self.buffer.pop(0)
 
+    def is_clear(self):
+        if len(self.buffer) > 0:
+            return False
+        else:
+            return True
 
 class ALU:
     def execInstr(self, preALU, postalu, reg):
@@ -890,6 +910,12 @@ class POSTALU(object):
             self.queue = []
             return temp
 
+    def is_clear(self):
+        if len(self.queue) > 0:
+            return False
+        else:
+            return True
+
 
 class PREMEM:
     def __init__(self):
@@ -909,8 +935,12 @@ class PREMEM:
             return self.buffer.pop(0)
         else:
             return 0
-"""    def ping(self):
-        return self.buffer[0]"""
+
+    def is_clear(self):
+        if len(self.buffer) > 0:
+            return False
+        else:
+            return True
 
 
 class MEM(object):
@@ -955,6 +985,12 @@ class POSTMEM(object):
             return [-1]
         else:
             return self.queue.pop(0)
+
+    def is_clear(self):
+        if len(self.queue) > 0:
+            return False
+        else:
+            return True
 
 
 
