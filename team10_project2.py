@@ -365,7 +365,7 @@ class CONTROL:
                 self.fetch_miss = False
         self.pipeline_has_stuff = self.check_pipeline_for_stuff()
         if not self.pipeline_has_stuff and self.break_found:
-            self.cache.wb_all()
+            # self.cache.wb_all()
             self.still_running = False
         self.print_state()
         self.cycle += 1
@@ -420,9 +420,11 @@ class CACHE:
         if self.sets[request_set][0][2] == request_tag:       # check first block in matching set for hit
             self.assocblock = 0
             self.hit = True
+            self.LRU[request_set] = 1
         elif self.sets[request_set][1][2] == request_tag:     # check second block
             self.assocblock = 1
             self.hit = True
+            self.LRU[request_set] = 0
         else:
             self.hit = False
             return 'miss'
@@ -437,10 +439,10 @@ class CACHE:
         request_set = target & self.set_mask
         request_set = request_tag >> 3
         target_entry = 4
-        self.LRU[request_set] = 0
+        # self.LRU[request_set] = 0
         if target % 8 == 0:
             target_entry = 3  # if address is %8 then we want the first word in block
-            self.LRU[request_set] = 1
+            # self.LRU[request_set] = 1
         self.sets[request_set][self.assocblock][1] = 1
         self.sets[request_set][self.assocblock][target_entry] = value  # else we want second word in block
 
@@ -521,6 +523,7 @@ class CACHE:
         for x in range(len(self.sets)):
             for y in range(len(self.sets[x])):
                 if self.sets[x][y][1] == 1:
+                    self.sets[x][y][1] = 0
                     self.write_back(x, self.sets[x][y][2], self.sets[x][y][3], self.sets[x][y][4])
 
     def print_state(self, output):
@@ -1219,7 +1222,8 @@ controller = CONTROL(my_list, out_file_pipeline)
 while controller.still_running:
     controller.next_cycle()
     do = "shit"
-
+controller.cache.wb_all()
+controller.print_state()
 
 
 
