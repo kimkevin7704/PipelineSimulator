@@ -421,7 +421,7 @@ class CACHE:
             self.hit = True
         else:
             self.hit = False
-            return -1
+            return 'miss'
         if pc % 8 == 0:
             return self.sets[request_set][self.assocblock][3]       # if address is %8 then we want the first word in block
         else:
@@ -476,8 +476,10 @@ class CACHE:
         else:
             block_to_grab = self.memory[block_to_grab2 - self.num_instructions]
             block_to_grab2 = self.memory[block_to_grab2 - self.num_instructions + 1]
+            block_to_grab = int(block_to_grab)
+            block_to_grab2 = int(block_to_grab2)
 
-        if self.sets[block_set][self.LRU[block_set]][1] == 1:
+        if self.sets[block_set][self.LRU[block_set]][1] == 1:  # detect if writeback necessary
             self.write_back(block_set, block_tag, self.sets[block_set][self.LRU[block_set]][3], self.sets[block_set][self.LRU[block_set]][4])
         self.sets[block_set][self.LRU[block_set]][0] = 1
         self.sets[block_set][self.LRU[block_set]][2] = block_tag
@@ -517,9 +519,15 @@ class CACHE:
             if x % 8 == 0:
                 output.write('\n' + str((data_start + (x * 4))) + ':')
             if x % 8 == 7:
-                output.write(str(self.memory[x]))
+                if type(self.memory[x]) == int:
+                    output.writestr((self.memory[x]))
+                else:
+                    output.write(str(to_int_2c(str(self.memory[x]))))
             else:
-                output.write(str(self.memory[x]))
+                if type(self.memory[x]) == int:
+                    output.write(str((self.memory[x])))
+                else:
+                    output.write(str(to_int_2c(str(self.memory[x]))))
                 output.write('\t')
         output.write('\n')
 
@@ -554,7 +562,7 @@ class IF:
             note: nops and invalid instructions are just discarded I guess so the controller doesn't need to know bout that   """
 
         self.hitCheck = cache.ping(pc)
-        if self.hitCheck < 0:     # make sure we hit
+        if self.hitCheck == 'miss':     # make sure we hit
             return -1
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
         # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
@@ -1068,13 +1076,13 @@ class MEM(object):
             pm_check = self.premem.buffer[0]
             target = reg.r[pm_check[2]] + pm_check[3] # calculates target address from contents of register[rs] + offset
             cache_check = self.cache.ping(target)
-            if cache_check > 0:  # case cache hit
+            if cache_check != 'miss':  # case cache hit
                 self.premem.removeFromBuffer()
                 if pm_check[0] == 14:   # case SW
                     self.cache.sw(target, reg.r[pm_check[1]])
                     return -2 # case SW successful, remove hold on LW
                 else:                   # case LW
-                    pm_check.append(to_int_2c(cache_check))
+                    pm_check.append(cache_check)
                     postmem.get_instr(pm_check)
                 return -1
             else: # case cache miss
