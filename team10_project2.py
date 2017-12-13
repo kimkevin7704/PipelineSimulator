@@ -2,25 +2,13 @@ import sys
 import getopt
 
 """
-    KEVIN'S UPDATE NOTES
-    
-    IF now sends instructions to preissue buffer with relevant info
-    preissue buffer sends to issue
-    issue sorts and sends to preALU or preMEM
-    ALU takes from preALU and does calculation
-    
-    as of now, ALU is changing the registers in our register array. this should happen
-    in the WB component. can fix later
-    
-    premem gonna be hard cuz it involves a lot of cache hit shit that i dont get
-    
-    hazard checks aren't in... will prbly add after all components coded
-    
-    pc changes for branch instructions added
-"""
+STILL NEED:
+    -WHY IS AN INSTRUCTION BEING PULLED FROM WRONG LIST..
+    -BRANCH LOGIC IN IF
+    -FIX LW
+-"""
+
 # DISASSEMBLER METHODS
-
-
 def to_int_2c(bin):
     conversion = int(bin, 2)
     if bin[0] == '1':
@@ -289,7 +277,7 @@ class REG:
         self.holds = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     def print_regs(self, output):
-        output.write('Registers\nR00:')
+        output.write('\n\nRegisters\nR00:')
         for x in range(0, 8):
             output.write('\t' + str(self.r[x]))
         output.write('\nR08:')
@@ -316,7 +304,6 @@ class CONTROL:
         self.pipeline_has_stuff = False
 
         #MACHINE COMPONENTS
-        #things we need: pre-issue buffer
         self.reg = REG()
         self.cache = CACHE(iput)
         self.ifetch = IF(self.reg)
@@ -333,10 +320,14 @@ class CONTROL:
     def print_state(self):  # function to output all states of current cycle
         self.output.write('--------------------\n')
         self.output.write('Cycle: ' + str(self.cycle) + '\n\n')
-        # self.ifetch.print_prebuffer(self.oput)
-        # stuff printed after fetch goes here
+        self.pib.printPrebuffer(self.output)
+        self.preALU.print_state(self.output)
+        self.postalu.print_state(self.output)
+        self.preMEM.print_state(self.output)
+        self.postmem.print_state(self.output)
         self.reg.print_regs(self.output)
-        # stuff printed after registers goes here
+        self.cache.print_state(self.output)
+
 
     def next_cycle(self):
         mem_miss = False
@@ -346,7 +337,7 @@ class CONTROL:
         mem_code = self.mem.instr_grab(self.reg, self.postmem)
         if mem_code > 0:  # function above returns the target address if there's a cache miss from MEM unit
             mem_miss = True
-            self.stalled = True
+            #self.stalled = True
         else:             # with this algorithm, a LW will only stall for one fetch, so not sure if this is correct
             if mem_code == -2:
                 self.waiting_for_stores_to_finish -= 1
@@ -354,12 +345,14 @@ class CONTROL:
             mem_miss = False
         self.alu.execInstr(self.preALU, self.postalu, self.reg)
         self.issue.send_next(self)
-        if not self.stalled:
-            fetch_code = self.ifetch.fetch(self.cache, self.pc, self.pib)
+        if not self.stalled and not self.break_found:
+            fetch_code = self.ifetch.fetch(self.reg, self.cache, self.pc, self.pib)
             if fetch_code == -1:
                 fetch_miss = True
             elif fetch_code == 0:
                 self.break_found = True
+            elif fetch_code > 0:
+                self.pc = fetch_code
             else:
                 self.pc += 8  # if no cache miss, increment PC
         self.print_state()
@@ -370,12 +363,14 @@ class CONTROL:
         self.pipeline_has_stuff = self.check_pipeline_for_stuff()
         if not self.pipeline_has_stuff and self.break_found:
             self.still_running = False
+        self.cycle += 1
 
-        def check_pipeline_for_stuff(self):
-            if self.pib.is_clear() and self.preALU.is_clear() and self.preMem.is_clear() and self.postmem.is_clear() and self.postalu.is_clear():
-                self.pipeline_has_stuff = False
-            else:
-                self.pipeline_has_stuff = True
+
+    def check_pipeline_for_stuff(self):
+        if self.pib.is_clear() and self.preALU.is_clear() and self.preMEM.is_clear() and self.postmem.is_clear() and self.postalu.is_clear():
+            return False
+        else:
+            return True
 
 
 class CACHE:
@@ -502,6 +497,25 @@ class CACHE:
             self.memory[(mem_to_write_to - self.num_instructions)] = word1
             self.memory[(mem_to_write_to - self.num_instructions) + 1] = word2
 
+    def print_state(self, output):
+        output.write('\n\nCache')
+        for x in range(4):
+            output.write('\nSet ' + str(x) + ': LRU=' + str(self.LRU[x]))
+            for y in range(2):
+                output.write('\n\tEntry ' + str(y) + ':[(' + str(self.sets[x][y][0]) + ',' + str(self.sets[x][y][1]) + ',' + str(self.sets[x][y][2]) + ')<' + str(self.sets[x][y][3]) + ',' +str( self.sets[x][y][4]) + '>]')
+        output.write('\n\nData')
+        data_start = (self.num_instructions * 4) + 96
+        num_data = len(self.memory)
+        for x in range(num_data):
+            if x % 8 == 0:
+                output.write('\n' + str((data_start + (x * 4))) + ':')
+            if x % 8 == 7:
+                output.write(str(to_int_2c(self.memory[x])))
+            else:
+                output.write(str(to_int_2c(self.memory[x])))
+                output.write('\t')
+        output.write('\n')
+
 
 class IF:
     def __init__(self, reg):
@@ -523,7 +537,7 @@ class IF:
         else:
             return 2
 
-    def fetch(self, cache, pc, pib):         # requests information at address: pc from cache
+    def fetch(self, reg, cache, pc, pib):         # requests information at address: pc from cache
         """SOHAILS NOTES: I'm setting this function to return 4 possible values back to the controller:
             -1 if its a miss - controller tells cache to grab that mem block at end of cycle
             -2 if we have a BEQ/BLTZ and we need a stall - NOT IMPLEMENTED IDK WHAT TO DO FOR THIS, HOW DOES IT KNOW IF THE REGISTERS ARE READY OR NOT
@@ -543,15 +557,24 @@ class IF:
         elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [0,0,0,0]
             self.hitCheck = -1
         elif instr_check[0] == 1:   # case: jr instr [1,rs,0,0]
-            pc = self.reg.r[instr_check[1]] - 4 # need to check if register is ready
+            if reg.holds[instr_check[1]] == 0:
+                return reg.r[instr_check[1]] + 4
+            else:
+                return pc
         elif instr_check[0] == 2:   # case: jump [2,jump_address,0,0]
-            pc = int(instr_check[1]) - 4
+            return instr_check[1] + 4
         elif instr_check[0] == 3:  # case: bltz [3,rs,label,0]
-            if(self.reg.r[instr_check[1]] < 0):
-                pc = pc + int(instr_check[2])
+            if self.reg.holds[instr_check[1]] == 0:
+                if self.reg.r[instr_check[1]] < 0:
+                    return instr_check[2] + 4
+            else:
+                return pc
         elif instr_check[0] == 4:  # case: beq [4,rs,rt,label]
-            if(self.reg.r[instr_check[1]] == self.reg.r[instr_check[2]]):
-                pc = pc + int(instr_check[3])
+            if self.reg.holds[instr_check[1]] == 0 and self.reg.holds[instr_check[2]] == 0:
+                if self.reg.r[instr_check[1]] == self.reg.r[instr_check[2]]:
+                    return instr_check[3] + 4
+            else:
+                return pc
         elif instr_check[0] == 5:  # case: sll [5, rd, rt, shamt]
             pib.addToBuffer(instr_check)
         elif instr_check[0] == 6:  # case: sub [6, rd, rt, rs]
@@ -577,25 +600,29 @@ class IF:
 
         if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
             self.hitCheck = cache.ping(pc + 4)
-            if self.hitCheck < 0:  # make sure we hit
-                return -1
-            # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
-            # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
-            instr_check = self.instr_check()
             if instr_check[0] == -1:  # case: BREAK found [-1,0,0,0]
                 return 0
             elif instr_check[0] == 0:  # case: nop or invalid instr - discard instruction [0,0,0,0]
                 self.hitCheck = -1
             elif instr_check[0] == 1:  # case: jr instr [1,rs,0,0]
-                pc = self.reg.r[instr_check[1]] - 4  # need to check if register is ready
+                if reg.holds[instr_check[1]] == 0:
+                    return reg.r[instr_check[1]] + 4
+                else:
+                    return pc + 4
             elif instr_check[0] == 2:  # case: jump [2,jump_address,0,0]
-                pc = int(instr_check[1]) - 4
+                return instr_check[1] + 4
             elif instr_check[0] == 3:  # case: bltz [3,rs,label,0]
-                if (self.reg.r[instr_check[1]] < 0):
-                    pc = pc + int(instr_check[2])
+                if self.reg.holds[instr_check[1]] == 0:
+                    if self.reg.r[instr_check[1]] < 0:
+                        return instr_check[2] + 4
+                else:
+                    return pc + 4
             elif instr_check[0] == 4:  # case: beq [4,rs,rt,label]
-                if (self.reg.r[instr_check[1]] == self.reg.r[instr_check[2]]):
-                    pc = pc + int(instr_check[3])
+                if self.reg.holds[instr_check[1]] == 0 and self.reg.holds[instr_check[2]] == 0:
+                    if self.reg.r[instr_check[1]] == self.reg.r[instr_check[2]]:
+                        return instr_check[3] + 4
+                else:
+                    return pc + 4
             elif instr_check[0] == 5:  # case: sll [5, rd, rt, shamt]
                 pib.addToBuffer(instr_check)
             elif instr_check[0] == 6:  # case: sub [6, rd, rt, rs]
@@ -803,12 +830,12 @@ class PREISSUEBUFFER:
         else:
             return 2
 
-    def printPrebuffer(self, outfile):
-        outfile.write('Pre-Issue Buffer:\n')
-        for x in range(0, 3):
-            outfile.write('Entry ' + x + ':')
-            if self.buffer[x] != 0:
-                outfile.write(':\t[' + inst_to_str(self.buffer[x]) + ']\n')
+    def printPrebuffer(self, output):
+        output.write('Pre-Issue Buffer:')
+        for x in range (4):
+            output.write('\n\tEntry ' + str(x) + ':')
+            if len(self.buffer) >= x + 1:
+                output.write('\t[' + self.buffer[x][4] + ']')
 
     def is_clear(self):
         if len(self.buffer) > 0:
@@ -821,27 +848,81 @@ class ISSUE():
     # STILL NEEDS HAZARD CHECKS (SHOULD DO AFTER FINISHING PIPELINE)
     # IF INSTRUCTION IS LW OR SW, SEND TO PREMEM QUEUE. ALL OTHERS GO TO PREALU
     def send_next(self, controller):
-        sent_to_mem = False
-        sent_to_alu = False
+        sent = 0
         items_to_remove = []
         item_number = 0
+        sw_passed_up = False
         for x in controller.pib.buffer:
-            if sent_to_alu and sent_to_mem:
+            if sent >= 2:
                 break
             instructionToSend = x
-            if (not sent_to_mem) and (instructionToSend[0] == 14 or instructionToSend[0] == 15):
-                if (instructionToSend[0] == 14) or (not controller.waiting_for_stores_to_finish > 0):
+            if instructionToSend[0] == 14 or instructionToSend[0] == 15: # case SW or LW - sending to preMEM
+                if ((instructionToSend[0] == 14 and not sw_passed_up)or (not controller.waiting_for_stores_to_finish > 0)) and controller.reg.holds[instructionToSend[1]] == 0:
                     items_to_remove.append(item_number)
                     controller.preMEM.addToBuffer(instructionToSend)
-                    sent_to_mem = True
+                    sent += 1
                     if instructionToSend[0] == 15:
                         controller.reg.holds[instructionToSend[1]] = 1
                     else:
+                        # controller.reg.holds[instructionToSend[1]] = 1
                         controller.waiting_for_stores_to_finish += 1
-            elif (not sent_to_alu) and not (instructionToSend[0] == 14 or instructionToSend[0] == 15) and (controller.reg.holds[instructionToSend[1]] == 0):
-                controller.preALU.addToBuffer(instructionToSend)
-                items_to_remove.append(item_number)
-                sent_to_alu = True
+                elif instructionToSend[0] == 14:
+                    sw_passed_up = True
+            elif not (instructionToSend[0] == 14 or instructionToSend[0] == 15) and (controller.reg.holds[instructionToSend[1]] == 0):  # case anything else
+                if instructionToSend[0] == 5:  # case: sll [5, rd, rt, shamt]
+                    if controller.reg.holds[instructionToSend[2]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 6:  # case: sub [6, rd, rt, rs]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 7:  # case: add [7, rd, rt, rs]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 8:  # case: srl [8, rd, rt, shamt]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 9:  # case: and [9, rd, rt, rs]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 10:  # case: or [10, rd, rt, rs]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 11:  # case: movz [11, rd, rt, rs]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 12:  # case: mul [12, rd, rt, rs]
+                    if controller.reg.holds[instructionToSend[2]] == 0 and controller.reg.holds[instructionToSend[3]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
+                elif instructionToSend[0] == 13:  # case: addi [13, rt, rs, imm]
+                    if controller.reg.holds[instructionToSend[2]] == 0:
+                        controller.reg.holds[instructionToSend[1]] = 1
+                        controller.preALU.addToBuffer(instructionToSend)
+                        items_to_remove.append(item_number)
+                        sent += 1
             item_number += 1
         items_to_remove.reverse()
         for x in items_to_remove:
@@ -866,6 +947,14 @@ class PREALU:
             return False
         else:
             return True
+    def print_state(self, output):
+        output.write('\nPre_ALU Queue:')
+        for x in range (2):
+            output.write('\n\tEntry ' + str(x) + ':')
+            if len(self.buffer) >= x + 1:
+                output.write('\t[' + self.buffer[x][4] + ']')
+
+
 
 class ALU:
     def execInstr(self, preALU, postalu, reg):
@@ -915,6 +1004,11 @@ class POSTALU(object):
             return False
         else:
             return True
+    def print_state(self, output):
+        output.write('\nPost_ALU Queue:')
+        output.write('\n\tEntry 0:')
+        if len(self.queue) > 0:
+            output.write('\t[' + str(self.queue[4]) + ']')
 
 
 class PREMEM:
@@ -941,6 +1035,12 @@ class PREMEM:
             return False
         else:
             return True
+    def print_state(self, output):
+        output.write('\nPre_MEM Queue:')
+        for x in range(2):
+            output.write('\n\tEntry ' + str(x) + ':')
+            if len(self.buffer) >= x + 1:
+                output.write('\t[' + self.buffer[x][4] + ']')
 
 
 class MEM(object):
@@ -991,6 +1091,12 @@ class POSTMEM(object):
             return False
         else:
             return True
+    def print_state(self, output):
+        output.write('\nPost_MEM Queue:')
+        x = 0
+        output.write('\n\tEntry ' + str(x) + ':')
+        if len(self.queue) >= x + 1:
+            output.write('\t[' + self.queue[x][4] + ']')
 
 
 
@@ -1009,6 +1115,45 @@ class WB(object):
                 self.reg.holds[mem_instr[1]] = 0
         if not alu_instr == '0' and not alu_instr[0] < 0:
             self.reg.r[alu_instr[1]] = alu_instr[5]
+            if alu_instr[0] == 5:  # case: sll [5, rd, rt, shamt]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+            elif alu_instr[0] == 6:  # case: sub [6, rd, rt, rs]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+                self.reg.holds[alu_instr[3]] = 0
+            elif alu_instr[0] == 7:  # case: add [7, rd, rt, rs]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+                self.reg.holds[alu_instr[3]] = 0
+            elif alu_instr[0] == 8:  # case: srl [8, rd, rt, shamt]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+            elif alu_instr[0] == 9:  # case: and [9, rd, rt, rs]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+                self.reg.holds[alu_instr[3]] = 0
+            elif alu_instr[0] == 10:  # case: or [10, rd, rt, rs]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+                self.reg.holds[alu_instr[3]] = 0
+            elif alu_instr[0] == 11:  # case: movz [11, rd, rt, rs]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+                self.reg.holds[alu_instr[3]] = 0
+            elif alu_instr[0] == 12:  # case: mul [12, rd, rt, rs]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+                self.reg.holds[alu_instr[3]] = 0
+            elif alu_instr[0] == 13:  # case: addi [13, rt, rs, imm]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+            elif alu_instr[0] == 14:  # case: sw [14, rt, rs, BOffset]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
+            elif alu_instr[0] == 15:  # case: lw [15, rt, rs, BOffset]
+                self.reg.holds[alu_instr[1]] = 0
+                self.reg.holds[alu_instr[2]] = 0
 
 
 # DRIVER
