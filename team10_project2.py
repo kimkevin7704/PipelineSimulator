@@ -355,14 +355,15 @@ class CONTROL:
                 self.pc = fetch_code
             else:
                 self.pc += 8  # if no cache miss, increment PC
-        self.print_state()
         if mem_miss:
             self.cache.grab_mem(mem_code)
         if fetch_miss:
             self.cache.grab_mem(self.pc)    # at end of cycle, if we had cache miss, tell cache to grab the stuff
         self.pipeline_has_stuff = self.check_pipeline_for_stuff()
         if not self.pipeline_has_stuff and self.break_found:
+            self.cache.wb_all()
             self.still_running = False
+        self.print_state()
         self.cycle += 1
 
 
@@ -433,9 +434,9 @@ class CACHE:
         request_set = request_tag >> 3
         target_entry = 4
         if target % 8 == 0:
-            target_entry = 4  # if address is %8 then we want the first word in block
-        self.sets[request_set][self.assocblock][2] = 1
-        self.sets[request_set][self.assocblock][target_entry] = str(value)  # else we want second word in block
+            target_entry = 3  # if address is %8 then we want the first word in block
+        self.sets[request_set][self.assocblock][1] = 1
+        self.sets[request_set][self.assocblock][target_entry] = value  # else we want second word in block
 
     """
     THIS ENTIRE FUNCTION IS UNNECESSARY. LW IS HANDLED IN MEM WHEN IT PINGS CACHE FOR A VALUE...
@@ -488,14 +489,20 @@ class CACHE:
             self.LRU[block_set] = 1
 
     def write_back(self, set, tag, word1, word2):
-        mem_to_write_to = (set << 5) + (tag << 3)
-        mem_to_write_to = (mem_to_write_to - 96)/4
+        mem_to_write_to = (set << 3) + (tag << 5)
+        target = (mem_to_write_to - 96)/4
         if mem_to_write_to < self.break_line:
-            self.instructions[mem_to_write_to] = word1
-            self.instructions[mem_to_write_to + 1] = word2
+            self.instructions[target] = word1
+            self.instructions[target + 1] = word2
         else:
-            self.memory[(mem_to_write_to - self.num_instructions)] = word1
-            self.memory[(mem_to_write_to - self.num_instructions) + 1] = word2
+            self.memory[(target - self.num_instructions)] = word1
+            self.memory[(target - self.num_instructions) + 1] = word2
+
+    def wb_all(self):
+        for x in range(len(self.sets)):
+            for y in range(len(self.sets[x])):
+                if self.sets[x][y][1] == 1:
+                    self.write_back(x, self.sets[x][y][2], self.sets[x][y][3], self.sets[x][y][4])
 
     def print_state(self, output):
         output.write('\n\nCache')
@@ -510,9 +517,9 @@ class CACHE:
             if x % 8 == 0:
                 output.write('\n' + str((data_start + (x * 4))) + ':')
             if x % 8 == 7:
-                output.write(str(to_int_2c(self.memory[x])))
+                output.write(str(self.memory[x]))
             else:
-                output.write(str(to_int_2c(self.memory[x])))
+                output.write(str(self.memory[x]))
                 output.write('\t')
         output.write('\n')
 
@@ -552,10 +559,10 @@ class IF:
         # IF HITCHECK != BRANCH, NOP, INVALID, OR BREAK...
         # controller.pib.addToBuffer(self.hitCheck)   # add instruction to PIB
         instr_check = self.instr_check()
-        if instr_check[0] == -1: # case: BREAK found [-1,0,0,0]
+        if instr_check[0] == -1:  # case: BREAK found [-1,0,0,0]
             return 0
-        elif instr_check[0] == 0: # case: nop or invalid instr - discard instruction [0,0,0,0]
-            self.hitCheck = -1
+        elif instr_check[0] == 0:  # case: nop or invalid instr - discard instruction [0,0,0,0]
+            self.hitCheck = 1
         elif instr_check[0] == 1:   # case: jr instr [1,rs,0,0]
             if reg.holds[instr_check[1]] == 0:
                 return reg.r[instr_check[1]] + 4
@@ -566,7 +573,7 @@ class IF:
         elif instr_check[0] == 3:  # case: bltz [3,rs,label,0]
             if self.reg.holds[instr_check[1]] == 0:
                 if self.reg.r[instr_check[1]] < 0:
-                    return instr_check[2] + 4
+                    return pc + instr_check[2] + 4
             else:
                 return pc
         elif instr_check[0] == 4:  # case: beq [4,rs,rt,label]
@@ -600,6 +607,9 @@ class IF:
 
         if pib.isFull() > 0 and self.hitCheck > 0:  # if hit and we have space, get next word also
             self.hitCheck = cache.ping(pc + 4)
+            if self.hitCheck < 0:
+                return pc + 4
+            instr_check = self.instr_check()
             if instr_check[0] == -1:  # case: BREAK found [-1,0,0,0]
                 return 0
             elif instr_check[0] == 0:  # case: nop or invalid instr - discard instruction [0,0,0,0]
@@ -614,7 +624,7 @@ class IF:
             elif instr_check[0] == 3:  # case: bltz [3,rs,label,0]
                 if self.reg.holds[instr_check[1]] == 0:
                     if self.reg.r[instr_check[1]] < 0:
-                        return instr_check[2] + 4
+                        return pc + instr_check[2] + 4
                 else:
                     return pc + 4
             elif instr_check[0] == 4:  # case: beq [4,rs,rt,label]
@@ -648,7 +658,7 @@ class IF:
 
     def instr_check(self):
         return_field = [0, 0, 0, 0, 0]
-        if self.hitCheck[0] == 0: #invalid instr check
+        if self.hitCheck[0] == '0': #invalid instr check
             return_field[0] = 0
             return return_field
         if self.hitCheck == '10000000000000000000000000001101':
@@ -1061,7 +1071,7 @@ class MEM(object):
             if cache_check > 0:  # case cache hit
                 self.premem.removeFromBuffer()
                 if pm_check[0] == 14:   # case SW
-                    self.cache.sw(target, pm_check[1])
+                    self.cache.sw(target, reg.r[pm_check[1]])
                     return -2 # case SW successful, remove hold on LW
                 else:                   # case LW
                     pm_check.append(to_int_2c(cache_check))
